@@ -103,19 +103,45 @@ def recursive_chunking(document: str, max_chunk_size: int, separators: Optional[
     return split_recursively(document, 0)
 
 def get_agentic_chunk_params(sample_text: str, llm_callback=None) -> tuple:
-    """Agentic chunking: ask LLM for chunk size and separator priority. Returns (max_chunk_size, separators or None, priority_label)."""
+    """Agentic chunking: ask LLM for chunk size and separator priority.
+    Returns (max_chunk_size, separators or None, priority_label, sample_preview, raw_llm_response, agent_reasoning).
+    sample_preview, raw_llm_response, agent_reasoning are for UI (agent brain); may be empty strings."""
     sample = (sample_text or "")[:2800].strip()
+    sample_preview = (sample[:500] + "..." if len(sample) > 500 else sample) if sample else ""
+    # #region agent log
+    try:
+        import json
+        _d = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H1", "location": "Utilities.py:get_agentic_chunk_params", "message": "entry", "data": {"len_sample": len(sample), "sample_preview_100": (sample[:100] if sample else "(empty)")}, "timestamp": int(__import__("time").time() * 1000)}
+        open("/Users/manasverma/Desktop/RAG Workshop/.cursor/debug.log", "a").write(json.dumps(_d) + "\n")
+    except Exception:
+        pass
+    # #endregion
     if not sample:
-        return 2000, ["\n\n", ". ", "? ", "! ", ", "], "paragraph"
-    prompt = """You are a RAG chunking advisor. Given this document sample, choose chunking for retrieval.
-Output exactly one line in this format: max_chunk_size=NUMBER separator_priority=WORD
+        # #region agent log
+        try:
+            _d = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H1", "location": "Utilities.py:early_return", "message": "early return empty sample", "data": {}, "timestamp": int(__import__("time").time() * 1000)}
+            open("/Users/manasverma/Desktop/RAG Workshop/.cursor/debug.log", "a").write(json.dumps(_d) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        return 2000, ["\n\n", ". ", "? ", "! ", ", "], "paragraph", "", "", ""
+    prompt = """You are a RAG chunking advisor. Look at the document sample and decide how to chunk it for retrieval.
+
+Think step by step: Is the text paragraph-heavy, sentence-heavy, or very granular? What chunk size would keep useful context without being too long?
+
+Output exactly two lines:
+Line 1: max_chunk_size=NUMBER separator_priority=WORD
 - NUMBER: integer between 500 and 3000 (character limit per chunk).
 - WORD: one of paragraph, sentence, comma, fixed (paragraph=break by paragraphs first; sentence=sentences first; comma=commas first; fixed=fixed size only).
-Example: max_chunk_size=1500 separator_priority=paragraph
+Line 2: reasoning=Your brief explanation of why you chose this (one short sentence).
+
+Example:
+max_chunk_size=1500 separator_priority=paragraph
+reasoning=Sample has clear paragraphs; 1500 chars keeps 1-2 paragraphs per chunk for context.
 
 Document sample:
 """
-    prompt += sample[:2400] + "\n\nYour one-line output:"
+    prompt += sample[:2400] + "\n\nYour two-line output:"
     out_text = ""
     if callable(llm_callback):
         try:
@@ -124,10 +150,23 @@ Document sample:
             pass
     if not out_text:
         try:
-            resp = ollama.chat(model=EMBEDDING_MODEL or "phi", messages=[{"role": "user", "content": prompt}])
+            resp = ollama.chat(model=LLM_MODEL or "gemma3:4b", messages=[{"role": "user", "content": prompt}])
             out_text = (resp.get("message") or {}).get("content") or ""
         except Exception:
             pass
+    # #region agent log
+    try:
+        import json
+        _d = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H2", "location": "Utilities.py:after_llm", "message": "out_text from LLM", "data": {"len_out_text": len(out_text or ""), "out_preview": (out_text or "")[:80]}, "timestamp": int(__import__("time").time() * 1000)}
+        open("/Users/manasverma/Desktop/RAG Workshop/.cursor/debug.log", "a").write(json.dumps(_d) + "\n")
+    except Exception:
+        pass
+    # #endregion
+    raw_llm_response = out_text or "Agent fallback: LLM did not return parseable output; applied sensible defaults."
+    agent_reasoning = ""
+    m_reason = re.search(r"reasoning\s*=\s*(.+)", out_text, re.I | re.DOTALL)
+    if m_reason:
+        agent_reasoning = m_reason.group(1).strip().split("\n")[0].strip()
     max_size = 2000
     priority = "paragraph"
     m = re.search(r"max_chunk_size\s*=\s*(\d+)", out_text, re.I)
@@ -143,8 +182,58 @@ Document sample:
     }
     separators = sep_map.get(priority, sep_map["paragraph"])
     if priority == "fixed":
-        return max_size, None, "fixed"
-    return max_size, separators, priority
+        return max_size, None, "fixed", sample_preview, raw_llm_response, agent_reasoning
+    return max_size, separators, priority, sample_preview, raw_llm_response, agent_reasoning
+
+
+def get_agentic_video_frame_params(duration_sec: float, llm_callback=None) -> tuple:
+    """Agentic video framing: ask LLM for fps and max_frames given video duration.
+    Returns (fps, max_frames, raw_llm_response, agent_reasoning)."""
+    duration_sec = max(1.0, min(7200.0, float(duration_sec)))  # 1s to 2h
+    prompt = f"""You are a video indexing advisor. A video is {duration_sec:.0f} seconds long. We will sample frames and embed them for visual search.
+
+Think step by step: For a {duration_sec:.0f}s video, how many frames per second should we sample? How many total frames is enough for search without being redundant or too heavy?
+
+Output exactly two lines:
+Line 1: fps=NUMBER max_frames=NUMBER
+- fps: between 0.25 and 2.0 (frames per second to sample).
+- max_frames: integer between 10 and 200 (cap on total frames to embed).
+Line 2: reasoning=Your brief explanation (one short sentence).
+
+Example for a 120s video:
+fps=1 max_frames=50
+reasoning=1 fps gives one frame per second; 50 frames keeps indexing fast while covering key moments.
+
+Your two-line output:"""
+    out_text = ""
+    if callable(llm_callback):
+        try:
+            out_text = (llm_callback(prompt) or "").strip()
+        except Exception:
+            pass
+    if not out_text:
+        try:
+            resp = ollama.chat(model=LLM_MODEL or "gemma3:4b", messages=[{"role": "user", "content": prompt}])
+            out_text = (resp.get("message") or {}).get("content") or ""
+        except Exception:
+            pass
+    raw_llm_response = out_text or "Agent fallback: LLM did not return parseable output; applied sensible defaults."
+    agent_reasoning = ""
+    m_reason = re.search(r"reasoning\s*=\s*(.+)", out_text, re.I | re.DOTALL)
+    if m_reason:
+        agent_reasoning = m_reason.group(1).strip().split("\n")[0].strip()
+    fps = 1.0
+    max_frames = 50
+    m = re.search(r"fps\s*=\s*([\d.]+)", out_text, re.I)
+    if m:
+        try:
+            fps = max(0.25, min(2.0, float(m.group(1))))
+        except ValueError:
+            pass
+    m = re.search(r"max_frames\s*=\s*(\d+)", out_text, re.I)
+    if m:
+        max_frames = max(10, min(200, int(m.group(1))))
+    return fps, max_frames, raw_llm_response, agent_reasoning
 
 
 def markdown_chunking(document: str) -> List[str]:

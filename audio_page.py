@@ -173,8 +173,8 @@ def split_audio_by_duration(audio_file_path, max_duration_seconds=60):
     return chunks
 
 
-def audio_processing_page(video_mode: bool = False):
-    """Main page for audio/video processing and storage in ChromaDB. video_mode=True shows Video Processing UI."""
+def audio_processing_page(video_mode: bool = False, llm_callback=None):
+    """Main page for audio processing and storage in ChromaDB. llm_callback is used for agentic chunking (Agentic RAG)."""
     if video_mode:
         st.title("🎬 Video Processing")
         upload_label = "Upload Video File"
@@ -186,7 +186,7 @@ def audio_processing_page(video_mode: bool = False):
     
     # RAG dependency clarity: what’s required to see RAG in Chat
     st.markdown(
-        '<p class="rag-deps-intro">Pipeline below matches the RAG indexing flow. '
+        '<p class="rag-deps-intro">Agentic RAG: the agent chooses how to chunk the transcription for better retrieval. '
         'Fill <strong>Documents</strong> (file) and <strong>Vector Store</strong>, then click Process.</p>',
         unsafe_allow_html=True
     )
@@ -225,7 +225,7 @@ def audio_processing_page(video_mode: bool = False):
     st.markdown(ui_arrow(), unsafe_allow_html=True)
     
     # —— Node: Chunking ——
-    st.markdown(ui_node_header("Chunking", "Transcription & split"), unsafe_allow_html=True)
+    st.markdown(ui_node_header("Chunking", "Agentic — agent chooses size & separators"), unsafe_allow_html=True)
     st.caption("Optional — improves quality")
     col1, col2 = st.columns(2)
     
@@ -457,9 +457,22 @@ def audio_processing_page(video_mode: bool = False):
                     time.sleep(0.2)
                     
                     # Step 4: Chunk text — agentic chunking (LLM chooses size & separators)
-                    steps_html.append(pipeline_step(4, "Agentic chunking (agent choosing params)...", False))
+                    steps_html.append(pipeline_step(4, "🤖 Agent is thinking… (choosing chunk size and separators)", False))
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
-                    max_chunk_size, chunk_separators, priority_label = get_agentic_chunk_params(full_transcription[:2800], llm_callback=None)
+                    max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning = get_agentic_chunk_params(full_transcription[:2800], llm_callback=llm_callback)
+                    steps_html[-1] = pipeline_step(4, f"Agentic chunking: max_size={max_chunk_size}, priority={priority_label}", True)
+                    pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
+                    with st.expander("🧠 Agent brain: how chunking was chosen", expanded=True):
+                        st.caption("The agent looked at a sample and chose these settings for better retrieval (Agentic RAG).")
+                        st.markdown("**What the agent saw (sample):**")
+                        st.text_area("Sample", agent_sample_preview or "(empty)", height=120, disabled=True, key="agent_brain_sample_audio")
+                        st.markdown("**Agent's answer:**")
+                        st.code(agent_raw_response, language=None)
+                        if agent_reasoning:
+                            st.markdown("**Agent's reasoning:**")
+                            st.info(agent_reasoning)
+                        st.markdown("**What we're using:**")
+                        st.info(f"max_size={max_chunk_size} chars, priority={priority_label}" + (" (fixed-size chunks)" if chunk_separators is None else ""))
                     if chunk_separators is not None:
                         text_chunks = recursive_chunking(full_transcription, max_chunk_size, chunk_separators)
                     else:

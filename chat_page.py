@@ -7,14 +7,6 @@ import os
 import time
 from rag_diagram import advanced_rag_diagram_html
 
-# Optional Gemini
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    genai = None
-    GEMINI_AVAILABLE = False
-
 # Set up logging for chat page
 logger = logging.getLogger(__name__)
 
@@ -162,75 +154,42 @@ def chat_page(collection=None):
                     except Exception:
                         raise RuntimeError('Streamlit rerun API not available. Please upgrade Streamlit.')
         
-        # Model Settings Section
+        # Model Settings Section (Ollama only)
         st.divider()
-        st.subheader("⚙️ Model Settings")
+        st.subheader("⚙️ Model Settings (Ollama)")
         
-        # LLM Provider: Gemini (default when key present) or Ollama
-        if 'llm_provider' not in st.session_state:
-            st.session_state.llm_provider = os.environ.get('LLM_PROVIDER', 'ollama')
-        provider_options = ["gemini", "ollama"] if GEMINI_AVAILABLE else ["ollama"]
-        if not GEMINI_AVAILABLE:
-            provider_options = ["ollama"]
-        st.session_state.llm_provider = st.selectbox(
-            "🔌 LLM Provider",
-            options=provider_options,
-            index=provider_options.index(st.session_state.llm_provider) if st.session_state.llm_provider in provider_options else 0,
-            help="Gemini = cloud (.env). Ollama = local.",
-            key="llm_provider_selector"
+        # Ollama: include Gemma 3 and other common models (must be pulled in Ollama)
+        cpu_friendly_llm_models = [
+            "gemma3:12b", "gemma3:4b", "gemma3:1b",
+            "phi", "tinyllama", "gemma:2b", "qwen2:1.5b",
+            "llama3.2:1b", "llama3.2:3b", "gemma2:2b", "mistral", "llama3.1:8b",
+            "deepseek-r1:8b", "qwen3-coder:30b",
+        ]
+        _default_ollama = os.environ.get("LLM_MODEL", "gemma3:4b")
+        if "selected_llm_model" not in st.session_state:
+            st.session_state.selected_llm_model = _default_ollama
+        if st.session_state.selected_llm_model not in cpu_friendly_llm_models:
+            st.session_state.selected_llm_model = _default_ollama if _default_ollama in cpu_friendly_llm_models else cpu_friendly_llm_models[1]
+        st.session_state.selected_llm_model = st.selectbox(
+            "💬 Chat Model (Ollama)",
+            options=cpu_friendly_llm_models,
+            index=cpu_friendly_llm_models.index(st.session_state.selected_llm_model),
+            help="Pick a model you have pulled in Ollama (e.g. gemma3:4b)",
+            key="llm_model_selector"
         )
-        
-        if st.session_state.llm_provider == "gemini":
-            gemini_models = [
-                "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash-exp",
-                "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"
-            ]
-            if 'selected_gemini_model' not in st.session_state:
-                st.session_state.selected_gemini_model = "gemini-2.5-flash"
-            # Ensure current selection is in the list (e.g. after removing a deprecated model)
-            if st.session_state.selected_gemini_model not in gemini_models:
-                st.session_state.selected_gemini_model = "gemini-2.5-flash"
-            st.session_state.selected_gemini_model = st.selectbox(
-                "💬 Gemini Model",
-                options=gemini_models,
-                key="gemini_model_selector"
-            )
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            if not api_key:
-                st.warning("Set GEMINI_API_KEY or GOOGLE_API_KEY for Gemini.")
-        else:
-            # Ollama: include Gemma 3 and other common models (must be pulled in Ollama)
-            cpu_friendly_llm_models = [
-                "gemma3:12b", "gemma3:4b", "gemma3:1b",
-                "phi", "tinyllama", "gemma:2b", "qwen2:1.5b",
-                "llama3.2:1b", "llama3.2:3b", "gemma2:2b", "mistral", "llama3.1:8b",
-                "deepseek-r1:8b", "qwen3-coder:30b",
-            ]
-            _default_ollama = os.environ.get("LLM_MODEL", "gemma3:4b")
-            if "selected_llm_model" not in st.session_state:
-                st.session_state.selected_llm_model = _default_ollama
-            if st.session_state.selected_llm_model not in cpu_friendly_llm_models:
-                st.session_state.selected_llm_model = _default_ollama if _default_ollama in cpu_friendly_llm_models else cpu_friendly_llm_models[1]
-            st.session_state.selected_llm_model = st.selectbox(
-                "💬 Chat Model (Ollama)",
-                options=cpu_friendly_llm_models,
-                index=cpu_friendly_llm_models.index(st.session_state.selected_llm_model),
-                help="Pick a model you have pulled in Ollama (e.g. gemma3:4b)",
-                key="llm_model_selector"
-            )
-            model_sizes = {
-                "gemma3:12b": "~7GB", "gemma3:4b": "~2.5GB", "gemma3:1b": "~1GB",
-                "tinyllama": "~600MB", "phi": "~1.6GB", "gemma:2b": "~1.6GB",
-                "qwen2:1.5b": "~900MB", "llama3.2:1b": "~1.3GB", "llama3.2:3b": "~2GB",
-                "gemma2:2b": "~1.6GB", "mistral": "~4GB", "llama3.1:8b": "~4.7GB",
-                "deepseek-r1:8b": "~5GB", "qwen3-coder:30b": "~18GB",
-            }
-            st.caption(f"📊 {model_sizes.get(st.session_state.selected_llm_model, '')}")
-            st.caption("Models that don't support tools (e.g. gemma3) use single-shot RAG (one search).")
+        model_sizes = {
+            "gemma3:12b": "~7GB", "gemma3:4b": "~2.5GB", "gemma3:1b": "~1GB",
+            "tinyllama": "~600MB", "phi": "~1.6GB", "gemma:2b": "~1.6GB",
+            "qwen2:1.5b": "~900MB", "llama3.2:1b": "~1.3GB", "llama3.2:3b": "~2GB",
+            "gemma2:2b": "~1.6GB", "mistral": "~4GB", "llama3.1:8b": "~4.7GB",
+            "deepseek-r1:8b": "~5GB", "qwen3-coder:30b": "~18GB",
+        }
+        st.caption(f"📊 {model_sizes.get(st.session_state.selected_llm_model, '')}")
+        st.caption("Models that don't support tools (e.g. gemma3) use single-shot RAG (one search).")
         
         with st.expander("ℹ️ Model Tips", expanded=False):
-            st.markdown("**Ollama:** local, no API key. **Gemini:** cloud, set GEMINI_API_KEY.")
-            st.markdown("**Tool support:** For multi-search agentic RAG with Ollama, use a model that supports tools (e.g. qwen3:4b, llama3.1:8b). Others automatically use one search + answer.")
+            st.markdown("**Ollama:** local, no API key required.")
+            st.markdown("**Tool support:** For multi-search agentic RAG, use a model that supports tools (e.g. qwen3:4b, llama3.1:8b). Others use one search + answer.")
         
         # Collection selector if we don't have a specific collection
         active_collection = collection
@@ -293,14 +252,11 @@ def chat_page(collection=None):
     # RAG dependency: only requirement here is having a collection selected
     st.caption("Required for RAG: select a collection in the sidebar, then ask a question below.")
     meta = get_collection_metadata(active_collection)
-    if st.session_state.get('llm_provider') == 'gemini':
-        current_llm = st.session_state.get('selected_gemini_model', 'gemini-2.5-flash')
-    else:
-        current_llm = st.session_state.get('selected_llm_model', LLM_MODEL)
+    current_llm = st.session_state.get('selected_llm_model', LLM_MODEL)
     st.info(
         f"💬 **{meta['name']}** &nbsp;|&nbsp; "
         f"📑 {meta['count']} docs &nbsp;|&nbsp; "
-        f"🤖 {st.session_state.get('llm_provider', 'ollama').title()}: {current_llm}"
+        f"🤖 Ollama: {current_llm}"
     )
     
     # Debug: Show collection summary
@@ -349,7 +305,6 @@ def chat_page(collection=None):
 
         agent_steps: List[Dict[str, Any]] = []
         full_response: List[str] = []
-        provider = st.session_state.get("llm_provider", "ollama")
         max_rounds = 5
 
         def search_fn_for_agent(query: str) -> dict:
@@ -358,98 +313,51 @@ def chat_page(collection=None):
             agent_steps.append({"type": "search", "query": query, "chunks": chunks})
             return {"context": context, "chunk_count": len(chunks)}
 
-        if provider == "gemini" and GEMINI_AVAILABLE:
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            if not api_key:
-                st.error("Set GEMINI_API_KEY or GOOGLE_API_KEY for Gemini.")
-                return
-            genai.configure(api_key=api_key)
-            model_name = st.session_state.get("selected_gemini_model", "gemini-2.5-flash")
-            from google.generativeai import protos
-            from google.generativeai.types import content_types
-            search_decl = content_types.CallableFunctionDeclaration(
-                name="search_documents",
-                description="Search the document knowledge base for relevant passages. Call with a search query. You can call this multiple times with different queries.",
-                parameters={
-                    "type": "object",
-                    "properties": {"query": {"type": "string", "description": "The search query"}},
-                    "required": ["query"],
-                },
-                function=search_fn_for_agent,
-            )
-            tool = content_types.Tool(function_declarations=[search_decl])
-            tools_lib = content_types.to_function_library([tool])
-            system_instruction = (
-                "You are an assistant with access to search_documents(query). Use it to look up information in the knowledge base. "
-                "You can call it zero, one, or multiple times with different queries. When you have enough information, answer the user. Do not make up information."
-            )
-            model = genai.GenerativeModel(model_name, tools=[tool], system_instruction=system_instruction)
-            contents = [content_types.to_content({"role": "user", "parts": [prompt]})]
-            final_text = ""
+        model_name = st.session_state.get("selected_llm_model", LLM_MODEL)
+        messages = [{"role": "user", "content": prompt}]
+        final_text = ""
+        try:
             for _ in range(max_rounds):
-                response = model.generate_content(contents, stream=False)
-                if not response.candidates or not response.candidates[0].content.parts:
-                    final_text = (response.text or "").strip()
+                response = ollama.chat(model=model_name, messages=messages, tools=[search_fn_for_agent])
+                msg = getattr(response, "message", response) if not isinstance(response, dict) else response.get("message") or {}
+                tool_calls = getattr(msg, "tool_calls", None) or (msg.get("tool_calls") if isinstance(msg, dict) else []) or []
+                content = getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "") or ""
+                if not tool_calls:
+                    final_text = (content or "").strip()
                     break
-                function_calls = [p.function_call for p in response.candidates[0].content.parts if getattr(p, "function_call", None)]
-                if not function_calls:
-                    final_text = (response.text or "").strip()
-                    break
-                contents.append(response.candidates[0].content)
-                response_parts = []
-                for fc in function_calls:
-                    args = dict(getattr(fc, "args", {}) or {})
-                    q = args.get("query", "")
+                tc_list = list(tool_calls) if hasattr(tool_calls, "__iter__") and not isinstance(tool_calls, dict) else [tool_calls]
+                assistant_msg = {"role": "assistant", "content": content}
+                if tc_list:
+                    assistant_msg["tool_calls"] = [{"id": str(i), "function": {"name": (getattr(t, "function", t) or {}).get("name") if hasattr(t, "function") else (t.get("function") or {}).get("name"), "arguments": str(getattr(getattr(t, "function", None) or {}, "arguments", t.get("function", {}).get("arguments") or {}))} if isinstance(getattr(t, "function", t) or t.get("function"), dict) else {"name": getattr(getattr(t, "function", None), "name", "search_documents"), "arguments": str(getattr(getattr(t, "function", None), "arguments", {}))}} for i, t in enumerate(tc_list)]
+                messages.append(assistant_msg)
+                for tc in tc_list:
+                    fn = getattr(tc, "function", None) or (tc.get("function") if isinstance(tc, dict) else {})
+                    name = getattr(fn, "name", None) or (fn.get("name") if isinstance(fn, dict) else "search_documents")
+                    args = getattr(fn, "arguments", None) or (fn.get("arguments") if isinstance(fn, dict) else {})
+                    if isinstance(args, str):
+                        import json
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {}
+                    q = (args or {}).get("query", "")
                     result = search_fn_for_agent(q)
-                    response_parts.append(protos.Part(function_response=protos.FunctionResponse(name=fc.name, response=result)))
-                contents.append(protos.Content(role="user", parts=response_parts))
+                    result_str = (result.get("context") or "")[:8000] or "(no results)"
+                    messages.append({"role": "tool", "content": result_str, "name": name})
             full_response = [final_text] if final_text else []
-        else:
-            model_name = st.session_state.get("selected_llm_model", LLM_MODEL)
-            messages = [{"role": "user", "content": prompt}]
-            final_text = ""
-            try:
-                for _ in range(max_rounds):
-                    response = ollama.chat(model=model_name, messages=messages, tools=[search_fn_for_agent])
-                    msg = getattr(response, "message", response) if not isinstance(response, dict) else response.get("message") or {}
-                    tool_calls = getattr(msg, "tool_calls", None) or (msg.get("tool_calls") if isinstance(msg, dict) else []) or []
-                    content = getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "") or ""
-                    if not tool_calls:
-                        final_text = (content or "").strip()
-                        break
-                    tc_list = list(tool_calls) if hasattr(tool_calls, "__iter__") and not isinstance(tool_calls, dict) else [tool_calls]
-                    assistant_msg = {"role": "assistant", "content": content}
-                    if tc_list:
-                        assistant_msg["tool_calls"] = [{"id": str(i), "function": {"name": (getattr(t, "function", t) or {}).get("name") if hasattr(t, "function") else (t.get("function") or {}).get("name"), "arguments": str(getattr(getattr(t, "function", None) or {}, "arguments", t.get("function", {}).get("arguments") or {}))} if isinstance(getattr(t, "function", t) or t.get("function"), dict) else {"name": getattr(getattr(t, "function", None), "name", "search_documents"), "arguments": str(getattr(getattr(t, "function", None), "arguments", {}))}} for i, t in enumerate(tc_list)]
-                    messages.append(assistant_msg)
-                    for tc in tc_list:
-                        fn = getattr(tc, "function", None) or (tc.get("function") if isinstance(tc, dict) else {})
-                        name = getattr(fn, "name", None) or (fn.get("name") if isinstance(fn, dict) else "search_documents")
-                        args = getattr(fn, "arguments", None) or (fn.get("arguments") if isinstance(fn, dict) else {})
-                        if isinstance(args, str):
-                            import json
-                            try:
-                                args = json.loads(args)
-                            except Exception:
-                                args = {}
-                        q = (args or {}).get("query", "")
-                        result = search_fn_for_agent(q)
-                        result_str = (result.get("context") or "")[:8000] or "(no results)"
-                        messages.append({"role": "tool", "content": result_str, "name": name})
+        except Exception as ollama_err:
+            err_str = str(ollama_err).lower()
+            if "does not support tools" in err_str or "status code: 400" in err_str:
+                # Model doesn't support tool calling: fall back to single-shot RAG (one search + one answer)
+                context, chunks = _run_search(active_collection, prompt, n_results=4)
+                agent_steps.append({"type": "search", "query": prompt, "chunks": chunks})
+                augmented = f"Use the following context from the knowledge base to answer the question. Do not make up information.\n\nContext:\n{context[:6000]}\n\nQuestion: {prompt}\n\nAnswer:"
+                resp = ollama.chat(model=model_name, messages=[{"role": "user", "content": augmented}])
+                msg = getattr(resp, "message", resp) if not isinstance(resp, dict) else resp.get("message") or {}
+                final_text = (getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "") or "").strip()
                 full_response = [final_text] if final_text else []
-            except Exception as ollama_err:
-                err_str = str(ollama_err).lower()
-                if "does not support tools" in err_str or "status code: 400" in err_str:
-                    # Model doesn't support tool calling: fall back to single-shot RAG (one search + one answer)
-                    context, chunks = _run_search(active_collection, prompt, n_results=4)
-                    agent_steps.append({"type": "search", "query": prompt, "chunks": chunks})
-                    augmented = f"Use the following context from the knowledge base to answer the question. Do not make up information.\n\nContext:\n{context[:6000]}\n\nQuestion: {prompt}\n\nAnswer:"
-                    resp = ollama.chat(model=model_name, messages=[{"role": "user", "content": augmented}])
-                    msg = getattr(resp, "message", resp) if not isinstance(resp, dict) else resp.get("message") or {}
-                    final_text = (getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "") or "").strip()
-                    full_response = [final_text] if final_text else []
-                else:
-                    raise
+            else:
+                raise
 
         with st.chat_message("assistant"):
             with st.status("Agentic RAG pipeline", state="running", expanded=True) as status:

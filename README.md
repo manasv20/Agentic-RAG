@@ -4,7 +4,7 @@ A lightweight Retrieval-Augmented Generation (RAG) demo for local document and a
 
 - **Fast Setup**: Uses Streamlit for the UI and runs completely locally
 - **Flexible Storage**: Uses ChromaDB for vector storage (with in-memory fallback)
-- **Local or cloud LLM**: Ollama (default) for local chat and embeddings; optional Gemini for cloud
+- **LLM**: Ollama only for local chat and embeddings
 - **Agentic RAG**: Chat agent can search your docs multiple times before answering (when the model supports tools; otherwise single-shot RAG)
 - **Smart Chunking**: Agentic chunking (LLM picks size/separators from a document sample) plus fixed/recursive strategies
 - **Audio Transcription**: Process audio/video (meetings, podcasts) and add transcriptions to your knowledge base
@@ -434,7 +434,6 @@ You can override some defaults using environment variables (set these before run
 - `COLLECTION_NAME` — default collection name used by the app (default: `localrag`)
 - `EMBEDDING_MODEL` — Ollama embedding model name to use (default set in `Utilities.py`)
 - `LLM_MODEL` — default Ollama chat model (default: `gemma3:4b`); for tool-calling agentic RAG use a model that supports tools (e.g. qwen3:4b)
-- `GEMINI_API_KEY` or `GOOGLE_API_KEY` — optional; if set, you can switch the Chat provider to Gemini in the UI
 
 Example (PowerShell):
 

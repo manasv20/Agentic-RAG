@@ -1,19 +1,18 @@
 import os
+import tempfile
 from pathlib import Path
 
-# Load .env from app directory (and optional GEMINI_ENV_PATH) so Gemini key is available
+# Load .env from app directory (for CHROMA_PATH, LLM_MODEL, etc.)
 try:
     from dotenv import load_dotenv
     _env_dir = Path(__file__).resolve().parent
     load_dotenv(_env_dir / ".env", override=True)
-    if os.environ.get("GEMINI_ENV_PATH"):
-        load_dotenv(os.environ["GEMINI_ENV_PATH"], override=True)
 except ImportError:
     pass
 
 import streamlit as st
 import PyPDF2
-from Utilities import fixed_size_chunking, recursive_chunking, initialize_chroma_db, CHROMA_PATH, get_agentic_chunk_params
+from Utilities import fixed_size_chunking, recursive_chunking, initialize_chroma_db, CHROMA_PATH, get_agentic_chunk_params, get_agentic_video_frame_params, LLM_MODEL
 import logging
 import time
 from datetime import datetime
@@ -42,7 +41,7 @@ try:
 except Exception:
     chromadb = None
 from chat_page import chat_page  # import the chat interface
-from audio_page import audio_processing_page  # import the audio processing page
+from audio_page import audio_processing_page, extract_audio_from_video, transcribe_audio, split_audio_by_duration  # audio + video extraction
 from rag_diagram import advanced_rag_diagram_html, ui_node_header, ui_arrow
 
 # #region agent log (optional debug; uses project logs dir so path is shareable)
@@ -113,19 +112,9 @@ def mock_document_classifier(text):
     return choice(classes)
 
 def _llm_for_agentic_chunking(prompt: str) -> str:
-    """Call Gemini if key set, else Ollama. Used by get_agentic_chunk_params."""
+    """Call Ollama for agentic chunking (used by get_agentic_chunk_params)."""
     try:
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            import google.generativeai as genai
-            genai.configure(api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            resp = model.generate_content(prompt)
-            if resp and resp.text:
-                return resp.text.strip()
-    except Exception:
-        pass
-    try:
-        resp = ollama.chat(model="phi", messages=[{"role": "user", "content": prompt}])
+        resp = ollama.chat(model=LLM_MODEL or "gemma3:4b", messages=[{"role": "user", "content": prompt}])
         return ((resp.get("message") or {}).get("content") or "").strip()
     except Exception:
         return ""
@@ -134,7 +123,7 @@ def _llm_for_agentic_chunking(prompt: str) -> str:
 def document_processing_page():
     st.title("📄 Document Processing")
     st.markdown(
-        '<p class="rag-deps-intro">Pipeline below matches the RAG indexing flow. '
+        '<p class="rag-deps-intro">Agentic RAG: the agent chooses how to chunk your document for better retrieval. '
         'Fill <strong>Documents</strong> and <strong>Vector Store</strong>, then click Process.</p>',
         unsafe_allow_html=True
     )
@@ -150,7 +139,7 @@ def document_processing_page():
     st.markdown(ui_arrow(), unsafe_allow_html=True)
 
     # —— Node: Chunking ——
-    st.markdown(ui_node_header("Chunking", "Optional"), unsafe_allow_html=True)
+    st.markdown(ui_node_header("Chunking", "Agentic — agent chooses size & separators"), unsafe_allow_html=True)
     split_pdf_option = st.checkbox("Split PDF into smaller files", value=False, key="split_pdf_opt")
     if split_pdf_option:
         pages_per_file = st.number_input("Pages per file:", min_value=1, max_value=1000, value=10, step=1, key="pages_per_file")
@@ -430,12 +419,44 @@ def document_processing_page():
                             sample_text += (p.extract_text() or "") + "\n"
                         except Exception:
                             pass
-                    max_chunk_size, chunk_separators, priority_label = get_agentic_chunk_params(sample_text, llm_callback=_llm_for_agentic_chunking)
+                    # #region agent log
+                    try:
+                        import json
+                        _d = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H1", "location": "localragdemo.py:after_sample", "message": "sample_text after first 2 pages", "data": {"len_sample_text": len(sample_text), "sample_preview": (sample_text[:100] if sample_text else "(empty)"), "empty": not (sample_text or "").strip()}, "timestamp": int(time.time() * 1000)}
+                        open("/Users/manasverma/Desktop/RAG Workshop/.cursor/debug.log", "a").write(json.dumps(_d) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
+                    live_log.markdown(
+                        '<div class="pipeline-log">'
+                        '<span class="pipeline-line pipeline-running">🤖 Agent is thinking… (choosing chunk size and separators for retrieval)</span>'
+                        '</div>', unsafe_allow_html=True
+                    )
+                    max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning = get_agentic_chunk_params(sample_text, llm_callback=_llm_for_agentic_chunking)
+                    # #region agent log
+                    try:
+                        import json
+                        _d = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H1", "location": "localragdemo.py:after_get_agentic", "message": "values passed to Agent brain UI", "data": {"len_preview": len(agent_sample_preview or ""), "len_raw_response": len(agent_raw_response or ""), "raw_response_preview": (agent_raw_response or "")[:80]}, "timestamp": int(time.time() * 1000)}
+                        open("/Users/manasverma/Desktop/RAG Workshop/.cursor/debug.log", "a").write(json.dumps(_d) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
                     live_log.markdown(
                         f'<div class="pipeline-log">'
-                        f'<span class="pipeline-line pipeline-done">🤖 Agentic chunking: max_size={max_chunk_size}, priority={priority_label}</span>'
+                        f'<span class="pipeline-line pipeline-done">✓ Agentic chunking: max_size={max_chunk_size}, priority={priority_label}</span>'
                         f'</div>', unsafe_allow_html=True
                     )
+                    with st.expander("🧠 Agent brain: how chunking was chosen", expanded=True):
+                        st.caption("The agent looked at a sample and chose these settings for better retrieval (Agentic RAG).")
+                        st.markdown("**What the agent saw (sample):**")
+                        st.text_area("Sample", agent_sample_preview or "(empty)", height=120, disabled=True, key="agent_brain_sample_doc")
+                        st.markdown("**Agent's answer:**")
+                        st.code(agent_raw_response, language=None)
+                        if agent_reasoning:
+                            st.markdown("**Agent's reasoning:**")
+                            st.info(agent_reasoning)
+                        st.markdown("**What we're using:**")
+                        st.info(f"max_size={max_chunk_size} chars, priority={priority_label}" + (" (fixed-size chunks)" if chunk_separators is None else ""))
                     time.sleep(0.3)
 
                     # Collect chunks from all pages using agent-chosen params
@@ -566,6 +587,261 @@ def document_processing_page():
                     st.error(f"Unexpected error: {outer_e}")
                     st.info("Check the log file for detailed error information.")
 
+
+def video_full_page():
+    """Video processing with both audio (transcript) and visual (frames) in one CLIP-backed collection."""
+    st.title("🎬 Video Processing")
+    st.caption("Agentic RAG: we index **both** audio (transcribe → agent-chosen chunks) and visuals (agent-chosen frames) in one collection. No video without audio.")
+    try:
+        from video_vision import get_video_duration, get_clip_text_embedding_function, add_frames_to_existing_collection
+    except ImportError as e:
+        st.error("Video (audio+visual) requires extra dependencies. Install: pip install opencv-python-headless sentence-transformers Pillow")
+        st.code("pip install opencv-python-headless sentence-transformers Pillow", language="bash")
+        return
+    if chromadb is None:
+        st.error("ChromaDB is required for video processing.")
+        return
+    from chromadb.config import Settings
+
+    st.divider()
+    st.markdown(ui_node_header("Documents (Video)", "Required for RAG"), unsafe_allow_html=True)
+    st.caption("Upload a video; we extract audio (transcribe + chunk) and frames (CLIP), then store both in one collection.")
+    collection_names = []
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(anonymized_telemetry=False))
+        for c in client.list_collections():
+            try:
+                name = c.name if hasattr(c, "name") else str(c)
+                collection_names.append(name)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    new_label = "-- Create new collection --"
+    options = [new_label] + collection_names
+    chosen_name = st.selectbox("Choose collection (existing or create new):", options, key="video_full_collection")
+    if chosen_name == new_label:
+        new_name = st.text_input("New collection name:", key="video_full_new_name", placeholder="e.g. my_video")
+        chosen_name = new_name.strip() if (new_name and new_name.strip()) else None
+    else:
+        st.caption("Adding to an existing collection. It should be a CLIP collection (from a previous video run).")
+    audio_source = st.text_input("Source / Category", value="", key="video_full_src", placeholder="Optional")
+    language_options = {"English (US)": "en-US", "English (UK)": "en-GB", "Spanish": "es-ES", "French": "fr-FR", "German": "de-DE", "Italian": "it-IT", "Portuguese": "pt-BR", "Chinese (Mandarin)": "zh-CN", "Japanese": "ja-JP", "Korean": "ko-KR"}
+    selected_language = st.selectbox("Transcription language", list(language_options.keys()), key="video_full_lang")
+    language_code = language_options[selected_language]
+    chunk_audio = st.checkbox("Split long audio for transcription", value=True, key="video_full_chunk_audio", help="Split audio longer than 60s per segment")
+    uploaded = st.file_uploader("Upload video", type=["mp4", "webm", "mov", "mkv", "avi"], key="video_full_upload")
+
+    last_chunks = st.session_state.get("last_video_full_chunk_count")
+    last_frames = st.session_state.get("last_video_full_frame_count")
+    if last_chunks is not None or last_frames is not None:
+        st.success(f"✅ Last run: **{last_chunks or 0}** transcript chunks + **{last_frames or 0}** frames in one collection.")
+    st.markdown(ui_arrow(), unsafe_allow_html=True)
+    st.markdown(ui_node_header("Embedding & Vector Store", "CLIP for both transcript and frames"), unsafe_allow_html=True)
+
+    if uploaded and chosen_name:
+        st.info(f"📁 **{uploaded.name}** — Click **Process video (audio + visual)** to index both track and frames.")
+        if st.button("Process video (audio + visual)", type="primary", key="video_full_btn"):
+            temp_files = []
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="." + (uploaded.name.split(".")[-1] or "mp4")) as tmp:
+                    tmp.write(uploaded.read())
+                    video_path = tmp.name
+                temp_files.append(video_path)
+                duration_sec = get_video_duration(video_path)
+                with st.status("Processing video: audio + visual…", expanded=True) as status:
+                    # Agent: frame sampling
+                    st.write("Video duration: **{:.1f}s**. 🤖 Agent is thinking… (choosing frame sampling for visual search).".format(duration_sec))
+                    fps, max_frames, raw_frame_resp, frame_reasoning = get_agentic_video_frame_params(duration_sec, llm_callback=_llm_for_agentic_chunking)
+                    with st.expander("🧠 Agent brain: frame sampling", expanded=True):
+                        st.caption("The agent looked at the duration and chose these settings for better retrieval (Agentic RAG).")
+                        st.info("Duration: {:.1f}s".format(duration_sec))
+                        st.code(raw_frame_resp, language=None)
+                        if frame_reasoning:
+                            st.info("**Reasoning:** " + frame_reasoning)
+                        st.info("Using: fps={}, max_frames={}".format(fps, max_frames))
+                    # Extract audio and transcribe
+                    file_format = uploaded.name.split(".")[-1].lower()
+                    with open(video_path, "rb") as f:
+                        wav_path = extract_audio_from_video(f, file_format)
+                    temp_files.append(wav_path)
+                    audio_chunks = split_audio_by_duration(wav_path, 60) if chunk_audio else [wav_path]
+                    temp_files.extend([c for c in audio_chunks if c != wav_path])
+                    transcriptions = []
+                    for i, chunk_path in enumerate(audio_chunks):
+                        try:
+                            text = transcribe_audio(chunk_path, language=language_code)
+                            transcriptions.append(text)
+                        except Exception as e:
+                            logger.warning("Transcribe chunk %s failed: %s", i + 1, e)
+                    if not transcriptions:
+                        status.update(label="Transcription failed", state="error")
+                        st.error("No audio could be transcribed. Check language and try again.")
+                        for t in temp_files:
+                            try:
+                                if os.path.exists(t):
+                                    os.unlink(t)
+                            except Exception:
+                                pass
+                        return
+                    full_transcription = " ".join(transcriptions)
+                    # Agent: chunking
+                    st.write("🤖 Agent is thinking… (choosing chunk size and separators for transcript).")
+                    max_chunk_size, chunk_separators, priority_label, agent_sample, agent_raw, agent_reasoning = get_agentic_chunk_params(full_transcription[:2800], llm_callback=_llm_for_agentic_chunking)
+                    with st.expander("🧠 Agent brain: transcript chunking", expanded=True):
+                        st.caption("The agent looked at a sample and chose these settings for better retrieval (Agentic RAG).")
+                        st.text_area("Sample", agent_sample or "(empty)", height=80, disabled=True, key="video_full_agent_sample")
+                        st.code(agent_raw, language=None)
+                        if agent_reasoning:
+                            st.info("**Reasoning:** " + agent_reasoning)
+                        st.info("Using: max_size={}, priority={}".format(max_chunk_size, priority_label))
+                    if chunk_separators is not None:
+                        text_chunks = recursive_chunking(full_transcription, max_chunk_size, chunk_separators)
+                    else:
+                        text_chunks = fixed_size_chunking(full_transcription, max_chunk_size)
+                    # Create CLIP collection and add transcript (documents → CLIP text embeddings)
+                    clip_fn = get_clip_text_embedding_function()
+                    client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(anonymized_telemetry=False))
+                    collection = client.get_or_create_collection(name=chosen_name, embedding_function=clip_fn)
+                    transcript_meta = {"content_type": "video_transcription", "original_filename": uploaded.name}
+                    if audio_source:
+                        transcript_meta["source"] = audio_source
+                    transcript_ids = ["transcript_{}".format(i) for i in range(len(text_chunks))]
+                    transcript_metadatas = [{**transcript_meta, "chunk_index": i} for i in range(len(text_chunks))]
+                    collection.add(ids=transcript_ids, documents=text_chunks, metadatas=transcript_metadatas)
+                    # Add frames to same collection
+                    progress_ph = st.progress(0)
+                    def _prog(c, t):
+                        if t:
+                            progress_ph.progress(min(1.0, c / t))
+                    num_frames = add_frames_to_existing_collection(collection, video_path, fps=fps, max_frames=max_frames, progress_callback=_prog)
+                    progress_ph.progress(1.0)
+                    status.update(label="Done", state="complete")
+                    st.session_state["last_video_full_chunk_count"] = len(text_chunks)
+                    st.session_state["last_video_full_frame_count"] = num_frames
+                    st.session_state["chroma_collection"] = collection
+                    st.session_state["video_full_processed"] = True
+                    st.success("✅ Done: **{}** transcript chunks + **{}** frames in collection **{}**. Go to Chat to search by what was said or shown.".format(len(text_chunks), num_frames, chosen_name))
+                    with st.expander("Transcription preview", expanded=False):
+                        st.text_area("Transcribed text", full_transcription[:5000] + ("…" if len(full_transcription) > 5000 else ""), height=150, disabled=True)
+                    if st.button("Go to Chat", key="video_full_go_chat"):
+                        st.session_state["navigate_to_chat"] = True
+                        try:
+                            st.rerun()
+                        except Exception:
+                            st.experimental_rerun()
+            except Exception as e:
+                logger.exception("Video full processing failed")
+                st.error(str(e))
+            finally:
+                for t in temp_files:
+                    try:
+                        if os.path.exists(t):
+                            os.unlink(t)
+                    except Exception:
+                        pass
+    elif uploaded and not chosen_name:
+        st.warning("Enter or select a collection name.")
+    else:
+        st.info("Upload a video and choose a collection to index both audio (transcript) and visual (frames) in one place.")
+
+
+def video_visual_page():
+    """Page: upload video, agent chooses frame sampling (fps/max_frames), extract frames, embed with CLIP, store in ChromaDB."""
+    st.title("🎥 Video (visual)")
+    st.caption("Vectorize the video itself (frames) with CLIP for visual search. The agent decides how many frames to sample (no audio).")
+    try:
+        from video_vision import add_video_frames_to_chroma, get_video_duration
+    except ImportError as e:
+        st.error("Video visual mode requires extra dependencies. Install with: pip install opencv-python-headless sentence-transformers Pillow")
+        st.code("pip install opencv-python-headless sentence-transformers Pillow", language="bash")
+        return
+    st.divider()
+    collection_names = []
+    if chromadb is not None:
+        try:
+            from chromadb.config import Settings
+            client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(anonymized_telemetry=False))
+            for c in client.list_collections():
+                try:
+                    name = c.name if hasattr(c, "name") else str(c)
+                    collection_names.append(name)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    new_label = "-- Create new collection --"
+    options = [new_label] + collection_names
+    col_sel = st.selectbox("Choose collection (existing or create new):", options, key="video_visual_collection")
+    chosen_name = None
+    if col_sel != new_label:
+        chosen_name = col_sel
+    else:
+        new_name = st.text_input("New collection name:", key="video_visual_new_name", placeholder="e.g. my_video_frames")
+        if new_name and new_name.strip():
+            chosen_name = new_name.strip()
+    uploaded = st.file_uploader("Upload video", type=["mp4", "webm", "mov", "mkv", "avi"], key="video_visual_upload")
+    if uploaded and chosen_name:
+        st.success("Ready. Click **Extract and vectorize frames** — the agent will decide how many frames to sample from your video.")
+        if st.button("Extract and vectorize frames", type="primary", key="video_visual_btn"):
+            with st.status("Agent deciding frame sampling, then extracting and embedding...", expanded=True) as status:
+                progress = st.progress(0)
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix="." + (uploaded.name.split(".")[-1] or "mp4")) as tmp:
+                        tmp.write(uploaded.read())
+                        tmp_path = tmp.name
+                    try:
+                        duration_sec = get_video_duration(tmp_path)
+                        st.write(f"Video duration: **{duration_sec:.1f}s**. Asking agent for fps and max_frames...")
+                        fps, max_frames, raw_response, agent_reasoning = get_agentic_video_frame_params(duration_sec, llm_callback=_llm_for_agentic_chunking)
+                        with st.expander("🧠 Agent brain: how frame sampling was chosen", expanded=True):
+                            st.caption("The agent looked at the video duration and chose how many frames to sample for visual search.")
+                            st.markdown("**What the agent saw:**")
+                            st.info(f"Video duration: {duration_sec:.1f} seconds")
+                            st.markdown("**Agent's answer:**")
+                            st.code(raw_response, language=None)
+                            if agent_reasoning:
+                                st.markdown("**Agent's reasoning:**")
+                                st.info(agent_reasoning)
+                            st.markdown("**What we're using:**")
+                            st.info(f"fps={fps}, max_frames={max_frames}")
+                        progress.progress(0.2)
+                        def _progress(current, total):
+                            if total:
+                                progress.progress(0.2 + 0.8 * min(1.0, current / total))
+                        collection = add_video_frames_to_chroma(
+                            tmp_path,
+                            collection_name=chosen_name,
+                            fps=fps,
+                            max_frames=max_frames,
+                            progress_callback=_progress,
+                            CHROMA_PATH=CHROMA_PATH,
+                        )
+                        progress.progress(1.0)
+                        status.update(label="Done", state="complete")
+                        st.session_state["chroma_collection"] = collection
+                        st.success(f"Stored frame embeddings in collection **{chosen_name}**. Go to Chat to search by describing what you see.")
+                        if st.button("Go to Chat", key="video_visual_go_chat"):
+                            st.session_state["navigate_to_chat"] = True
+                            try:
+                                st.rerun()
+                            except Exception:
+                                st.experimental_rerun()
+                    finally:
+                        if os.path.exists(tmp_path):
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception:
+                                pass
+                except Exception as e:
+                    logger.exception("Video visual processing failed")
+                    st.error(str(e))
+    elif uploaded and not chosen_name:
+        st.warning("Enter or select a collection name.")
+    else:
+        st.info("Upload a video and choose a collection. The agent will decide how many frames to sample.")
+
+
 def _do_clear_chromadb():
     """Delete all ChromaDB collections and clear related session state."""
     try:
@@ -630,6 +906,7 @@ def main():
     if st.sidebar.button("🗑️ Clear app history", help="Clear chat history and reset UI state (keeps your indexed collections)."):
         _keys_to_clear = [
             "messages", "last_doc_chunk_count", "last_audio_chunk_count",
+            "last_video_full_chunk_count", "last_video_full_frame_count", "video_full_processed",
             "doc_processed", "audio_processed", "navigate_to_chat",
             "confirm_delete", "show_details", "uploaded_doc", "uploaded_audio",
             "last_processed_collection_name", "doc_page_collection_select",
@@ -703,18 +980,18 @@ def main():
             '<div class="home-cards">'
             '<div class="home-card"><div class="home-card-icon">📄</div><div class="home-card-title">Document Processing</div><div class="home-card-desc">Upload PDFs and add them to the knowledge base. Chunk, embed, and store in the vector DB.</div></div>'
             '<div class="home-card"><div class="home-card-icon">🎤</div><div class="home-card-title">Audio Processing</div><div class="home-card-desc">Upload audio (or video); we transcribe and index the content for retrieval.</div></div>'
-            '<div class="home-card"><div class="home-card-icon">🎬</div><div class="home-card-title">Video Processing</div><div class="home-card-desc">Upload video; we extract audio, transcribe, and index for RAG.</div></div>'
-            '<div class="home-card"><div class="home-card-icon">💬</div><div class="home-card-title">Chat</div><div class="home-card-desc">Select a collection and ask questions; the agent can search your docs multiple times (Agentic RAG).</div></div>'
+            '<div class="home-card"><div class="home-card-icon">🎬</div><div class="home-card-title">Video Processing</div><div class="home-card-desc">Upload video; we index both audio (transcribe + chunk) and visuals (frames) in one collection. No video without audio.</div></div>'
+            '<div class="home-card"><div class="home-card-icon">💬</div><div class="home-card-title">Chat</div><div class="home-card-desc">Select a collection and ask questions; the agent decides when and how to search (Agentic RAG).</div></div>'
             '</div>'
-            '<div class="home-cta">Start by adding content in Document, Audio, or Video Processing, then open Chat to query.</div>',
+            '<div class="home-cta">Add content in Document, Audio, or Video (each uses the agent for smart chunking), then open Chat to query.</div>',
             unsafe_allow_html=True
         )
     elif choice == "📄 Document Processing" or choice == "Document Processing":
         document_processing_page()
     elif choice == "🎤 Audio Processing" or choice == "Audio Processing":
-        audio_processing_page(video_mode=False)
+        audio_processing_page(video_mode=False, llm_callback=_llm_for_agentic_chunking)
     elif choice == "🎬 Video Processing" or choice == "Video Processing":
-        audio_processing_page(video_mode=True)
+        video_full_page()
     elif choice == "💬 Chat" or choice == "Chat":
         # Pass the ChromaDB collection if documents have been processed
         collection = st.session_state.get('chroma_collection')
