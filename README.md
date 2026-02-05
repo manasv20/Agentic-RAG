@@ -13,6 +13,17 @@ Process your PDF documents and audio files, manage multiple collections, and cha
 
 This README provides step-by-step setup for **Windows (PowerShell)** and **macOS (Terminal)** with troubleshooting tips.
 
+Documentation in this repo
+--------------------------
+| File | Description |
+|------|-------------|
+| **README.md** (this file) | Full setup, usage, and reference |
+| **COMMANDS.md** | Quick command reference (install, run, audio) |
+| **AUDIO_GUIDE.md** | Audio processing guide |
+| **AUDIO_EXAMPLES.md** | Audio usage examples |
+| **AUDIO_FEATURE_SUMMARY.md** | Audio feature overview |
+| **requirements.txt** | Python dependencies |
+
 Requirements
 ------------
 - Python 3.10 or newer
@@ -23,10 +34,11 @@ Requirements
 
 Quick start (macOS / Linux)
 ---------------------------
-1. Clone or copy the repo and change into the directory:
+1. Clone the repo and go into the project directory:
 
 ```bash
-cd "workshop demo"
+git clone https://github.com/YOUR_USERNAME/Agentic-RAG.git
+cd Agentic-RAG
 ```
 
 2. Create and activate a virtual environment (recommended):
@@ -56,18 +68,18 @@ streamlit run localragdemo.py
 
 Quick start (Windows PowerShell)
 --------------------------------
-1. Clone the repo and change into the directory:
+1. Clone the repo and go into the project directory:
 
 ```powershell
-git clone <repo-url> local-RAG-LLM
-cd local-RAG-LLM
+git clone https://github.com/YOUR_USERNAME/Agentic-RAG.git
+cd Agentic-RAG
 ```
 
 2. Create and activate a virtual environment (recommended):
 
 ```powershell
-python -m venv .\tempvenv
-.\.\tempvenv\Scripts\Activate.ps1
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
 3. Install Python dependencies:
@@ -109,7 +121,7 @@ pip install ollama
 
 Run the Streamlit app
 ----------------------
-From the repository root (with the venv active) run:
+From the project directory (with the venv active) run:
 
 **macOS / Linux:**
 ```bash

@@ -59,7 +59,7 @@ python3 scripts/test_audio_setup.py
 **Windows:**
 ```powershell
 # Activate virtual environment (if not already active)
-.\tempvenv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 
 # Run Streamlit app
 streamlit run localragdemo.py
@@ -150,9 +150,9 @@ streamlit cache clear
 ### First Time Setup
 **Windows:**
 ```powershell
-cd local-RAG-LLM
-python -m venv .\tempvenv
-.\tempvenv\Scripts\Activate.ps1
+cd Agentic-RAG
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 pip install SpeechRecognition pydub
 choco install ffmpeg   # or scoop install ffmpeg
@@ -162,7 +162,7 @@ streamlit run localragdemo.py
 
 **macOS / Linux:**
 ```bash
-cd "workshop demo"
+cd Agentic-RAG
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -175,8 +175,8 @@ streamlit run localragdemo.py
 ### Daily Usage
 **Windows:**
 ```powershell
-cd path\to\workshop-demo
-.\tempvenv\Scripts\Activate.ps1
+cd path\to\Agentic-RAG
+.\.venv\Scripts\Activate.ps1
 
 # 3. Run application
 streamlit run localragdemo.py
@@ -184,7 +184,7 @@ streamlit run localragdemo.py
 
 **macOS / Linux:**
 ```bash
-cd "workshop demo"
+cd Agentic-RAG
 source .venv/bin/activate
 streamlit run localragdemo.py
 # When done: deactivate
@@ -240,7 +240,7 @@ python --version
 ### Is Virtual Environment Active?
 ```powershell
 $env:VIRTUAL_ENV
-# Should show path to tempvenv
+# Should show path to .venv
 ```
 
 ### Are Audio Libraries Installed?
@@ -284,7 +284,7 @@ python -c "import ollama; print('Ollama OK')"
 - `chroma_db/` - Vector database storage
 - `logs/` - Application logs
 - `split_pdfs/` - Temporary PDF splits
-- `tempvenv/` - Python virtual environment
+- `.venv/` - Python virtual environment
 
 ### Documentation Files
 - `README.md` - Main documentation
