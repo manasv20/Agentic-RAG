@@ -1016,13 +1016,6 @@ def main():
 
     if choice == "🏠 Home":
         st.markdown(
-            '<div class="home-hero">'
-            '<h1>Agentic RAG Workshop</h1>'
-            '<p class="home-hero-sub">Ingest documents, audio, or video — then chat with your content. The assistant decides when and how to search (Agentic RAG).</p>'
-            '</div>',
-            unsafe_allow_html=True
-        )
-        st.markdown(
             '<div class="home-cards">'
             '<div class="home-card"><div class="home-card-icon">📄</div><div class="home-card-title">Document Processing</div><div class="home-card-desc">Upload PDFs and add them to the knowledge base. Chunk, embed, and store in the vector DB.</div></div>'
             '<div class="home-card"><div class="home-card-icon">🎤</div><div class="home-card-title">Audio Processing</div><div class="home-card-desc">Upload audio (or video); we transcribe and index the content for retrieval.</div></div>'
