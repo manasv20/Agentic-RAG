@@ -249,6 +249,11 @@ def chat_page(collection=None):
     if 'messages' not in st.session_state:
         st.session_state.messages = []
 
+    # Optional: show context when arriving from Home global search
+    initial_query = st.session_state.pop("chat_initial_query", None)
+    if initial_query:
+        st.info(f"🔍 **You searched for:** “{initial_query[:80]}{'…' if len(initial_query) > 80 else ''}” — ask a follow-up below.")
+
     # RAG dependency: only requirement here is having a collection selected
     st.caption("Required for RAG: select a collection in the sidebar, then ask a question below.")
     meta = get_collection_metadata(active_collection)

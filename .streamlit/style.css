@@ -511,6 +511,80 @@ h1 { margin-bottom: 0.25rem; }
     margin: 0 auto;
     line-height: 1.55;
 }
+/* Board-style hero: single value statement, no big title */
+.home-hero-board {
+    padding: 1.75rem 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+}
+.home-hero-board .home-hero-sub {
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    max-width: 640px;
+    font-weight: 500;
+    line-height: 1.6;
+}
+
+/* State of the System dashboard */
+.home-dashboard {
+    display: flex;
+    gap: 2rem;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius);
+}
+.home-dashboard-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.home-dashboard-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+}
+.home-dashboard-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* Jump back in */
+.home-jump-back {
+    margin: 1rem 0;
+    padding: 0.9rem 1.2rem;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+}
+.home-jump-back-label {
+    font-weight: 600;
+    color: var(--accent);
+    font-size: 0.9rem;
+}
+.home-jump-back-detail {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+/* Upload CTA label */
+.home-upload-cta-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem !important;
+}
+
 .home-cards {
     display: grid;
     grid-template-columns: repeat(2, 1fr);

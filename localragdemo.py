@@ -53,7 +53,7 @@ try:
     import chromadb
 except Exception:
     chromadb = None
-from chat_page import chat_page  # import the chat interface
+from chat_page import chat_page, get_available_collections  # chat interface + collection list for dashboard/search
 from audio_page import audio_processing_page, extract_audio_from_video, transcribe_audio, split_audio_by_duration  # audio + video extraction
 from rag_diagram import advanced_rag_diagram_html, ui_node_header, ui_arrow
 
@@ -72,6 +72,19 @@ def _dbg(payload):
 # Note: previously there was a compatibility wrapper for rerun here.
 # To avoid an extra wrapper, call Streamlit's rerun APIs inline where needed
 # and handle the AttributeError at the call site.
+
+
+def _chroma_storage_mb():
+    """Return ChromaDB storage size in MB (for dashboard)."""
+    try:
+        p = Path(CHROMA_PATH)
+        if not p.exists():
+            return 0.0
+        total = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        return round(total / (1024 * 1024), 1)
+    except Exception:
+        return 0.0
+
 
 def show_debug_panel():
     """Shows a collapsible debug panel with system information and app state"""
@@ -942,7 +955,8 @@ def main():
         "🎬 Video Processing",
         "💬 Chat"
     ]
-    _default_index = 4 if st.session_state.pop("navigate_to_chat", False) else 0
+    _nav_go_to = st.session_state.pop("nav_go_to_index", None)
+    _default_index = _nav_go_to if _nav_go_to is not None else (4 if st.session_state.pop("navigate_to_chat", False) else 0)
     choice = st.sidebar.radio("Select a step:", _nav_options, index=min(_default_index, len(_nav_options) - 1), label_visibility="collapsed")
     # #region agent log
     _dbg({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "H1", "location": "main:after_radio", "message": "current choice", "data": {"choice": choice}})
@@ -1015,14 +1029,122 @@ def main():
     show_debug_panel()
 
     if choice == "🏠 Home":
+        # State of the System dashboard
+        client, collection_info = get_available_collections()
+        total_indexed = sum((m.get("count") or 0) for _, m in (collection_info or []))
+        num_collections = len(collection_info or [])
+        storage_mb = _chroma_storage_mb()
+        st.markdown(
+            '<div class="home-dashboard">'
+            f'<div class="home-dashboard-stat"><span class="home-dashboard-value">{total_indexed:,}</span><span class="home-dashboard-label">Chunks indexed</span></div>'
+            f'<div class="home-dashboard-stat"><span class="home-dashboard-value">{num_collections}</span><span class="home-dashboard-label">Collections</span></div>'
+            f'<div class="home-dashboard-stat"><span class="home-dashboard-value">{storage_mb}</span><span class="home-dashboard-label">MB storage</span></div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            '<div class="home-hero home-hero-board">'
+            '<p class="home-hero-sub">Turn documents, meetings, and video into one searchable knowledge base. Ask questions in plain language and get answers grounded in your own content.</p>'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        # Global search
+        with st.form("home_global_search_form", clear_on_submit=False):
+            search_col1, search_col2 = st.columns([4, 1])
+            with search_col1:
+                search_query = st.text_input("Search your knowledge base", placeholder="Search by keyword or topic across all collections...", key="home_global_search_input", label_visibility="collapsed")
+            with search_col2:
+                search_submitted = st.form_submit_button("Search")
+        if search_submitted and (search_query or "").strip():
+            q = (search_query or "").strip()
+            search_results = []
+            for col, meta in (collection_info or []):
+                try:
+                    name = meta.get("name", getattr(col, "name", "?"))
+                    res = col.query(query_texts=[q], n_results=3)
+                    docs = (res.get("documents") or [[]])[0] if res else []
+                    for i, doc in enumerate(docs[:3]):
+                        if doc:
+                            search_results.append((name, (doc[:400] + "…" if len(str(doc)) > 400 else str(doc))))
+                except Exception:
+                    pass
+            if search_results:
+                with st.expander(f"🔍 Search results for “{q[:50]}{'…' if len(q) > 50 else ''}”", expanded=True):
+                    for cname, snippet in search_results:
+                        st.caption(f"**{cname}**")
+                        st.text(snippet)
+                        st.divider()
+                if st.button("Ask a follow-up in Chat", key="home_search_go_chat"):
+                    st.session_state["navigate_to_chat"] = True
+                    st.session_state["chat_initial_query"] = q
+                    try:
+                        st.rerun()
+                    except Exception:
+                        try:
+                            st.experimental_rerun()
+                        except Exception:
+                            pass
+            else:
+                st.info("No results found. Add documents, audio, or video in the steps above, then try again.")
+        # Jump back in
+        last_coll = st.session_state.get("last_processed_collection_name")
+        last_n = st.session_state.get("last_doc_chunk_count") or st.session_state.get("last_audio_chunk_count") or st.session_state.get("last_video_full_chunk_count")
+        if last_coll and last_n is not None:
+            st.markdown(
+                f'<div class="home-jump-back"><span class="home-jump-back-label">Jump back in</span>'
+                f'<span class="home-jump-back-detail">{last_coll} — {last_n:,} chunks</span></div>',
+                unsafe_allow_html=True
+            )
+            if st.button("Open in Chat", type="primary", key="home_jump_chat"):
+                st.session_state["navigate_to_chat"] = True
+                try:
+                    st.rerun()
+                except Exception:
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        pass
+        # Prominent Upload CTAs
+        st.markdown('<p class="home-upload-cta-label">Add content</p>', unsafe_allow_html=True)
+        up_c1, up_c2, up_c3 = st.columns(3)
+        with up_c1:
+            if st.button("📄 Add document", key="home_add_doc", use_container_width=True):
+                st.session_state["nav_go_to_index"] = 1
+                try:
+                    st.rerun()
+                except Exception:
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        pass
+        with up_c2:
+            if st.button("🎤 Add audio", key="home_add_audio", use_container_width=True):
+                st.session_state["nav_go_to_index"] = 2
+                try:
+                    st.rerun()
+                except Exception:
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        pass
+        with up_c3:
+            if st.button("🎬 Add video", key="home_add_video", use_container_width=True):
+                st.session_state["nav_go_to_index"] = 3
+                try:
+                    st.rerun()
+                except Exception:
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        pass
         st.markdown(
             '<div class="home-cards">'
-            '<div class="home-card"><div class="home-card-icon">📄</div><div class="home-card-title">Document Processing</div><div class="home-card-desc">Upload PDFs and add them to the knowledge base. Chunk, embed, and store in the vector DB.</div></div>'
-            '<div class="home-card"><div class="home-card-icon">🎤</div><div class="home-card-title">Audio Processing</div><div class="home-card-desc">Upload audio (or video); we transcribe and index the content for retrieval.</div></div>'
-            '<div class="home-card"><div class="home-card-icon">🎬</div><div class="home-card-title">Video Processing</div><div class="home-card-desc">Upload video; we index both audio (transcribe + chunk) and visuals (frames) in one collection. No video without audio.</div></div>'
-            '<div class="home-card"><div class="home-card-icon">💬</div><div class="home-card-title">Chat</div><div class="home-card-desc">Select a collection and ask questions; the agent decides when and how to search (Agentic RAG).</div></div>'
+            '<div class="home-card"><div class="home-card-icon">📄</div><div class="home-card-title">Documents</div><div class="home-card-desc">Add PDFs. The system organizes and indexes them so you can ask questions and get accurate answers from your own content.</div></div>'
+            '<div class="home-card"><div class="home-card-icon">🎤</div><div class="home-card-title">Audio</div><div class="home-card-desc">Add recordings—meetings, calls, podcasts. Everything becomes searchable and answerable in natural language.</div></div>'
+            '<div class="home-card"><div class="home-card-icon">🎬</div><div class="home-card-title">Video</div><div class="home-card-desc">Add video. We capture what’s said and what’s shown, so you can search and query both in one place.</div></div>'
+            '<div class="home-card"><div class="home-card-icon">💬</div><div class="home-card-title">Chat</div><div class="home-card-desc">Ask questions in plain language. The AI finds the right content and answers using only what you’ve added—reliable and traceable.</div></div>'
             '</div>'
-            '<div class="home-cta">Add content in Document, Audio, or Video (each uses the agent for smart chunking), then open Chat to query.</div>',
+            '<div class="home-cta">Add your content above, then open Chat to ask anything. All processing runs on your infrastructure.</div>',
             unsafe_allow_html=True
         )
     elif choice == "📄 Document Processing" or choice == "Document Processing":
