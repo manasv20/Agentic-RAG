@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import logging
 from datetime import datetime
-from Utilities import recursive_chunking, initialize_chroma_db, CHROMA_PATH, fixed_size_chunking, get_agentic_chunk_params
+from Utilities import recursive_chunking, initialize_chroma_db, CHROMA_PATH, fixed_size_chunking, get_agentic_sample_chars, get_agentic_chunk_params
 import tempfile
 import time
 import wave
@@ -456,15 +456,27 @@ def audio_processing_page(video_mode: bool = False, llm_callback=None):
                     diagram_placeholder.markdown(advanced_rag_diagram_html("indexing", 2), unsafe_allow_html=True)
                     time.sleep(0.2)
                     
-                    # Step 4: Chunk text — agentic chunking (LLM chooses size & separators)
-                    steps_html.append(pipeline_step(4, "🤖 Agent is thinking… (choosing chunk size and separators)", False))
+                    # Step 4: Agent decides how much transcript to sample, then chunking
+                    total_chars = len(full_transcription)
+                    steps_html.append(pipeline_step(4, "🤖 Agent is thinking… (choosing how much transcript to sample)", False))
+                    pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
+                    with st.spinner("🤖 Agent is thinking… (choosing how much transcript to sample)"):
+                        n_sample_chars, raw_sample_response = get_agentic_sample_chars(total_chars, llm_callback=llm_callback)
+                    steps_html[-1] = pipeline_step(4, f"Agent chose to sample {n_sample_chars} chars (of {total_chars})", True)
+                    pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
+                    steps_html.append(pipeline_step(5, "🤖 Agent is thinking… (choosing chunk size and separators)", False))
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
                     with st.spinner("🤖 Agent is thinking… (choosing chunk size and separators)"):
-                        max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning, _chunking_style = get_agentic_chunk_params(full_transcription[:2800], llm_callback=llm_callback)
-                    steps_html[-1] = pipeline_step(4, f"Agentic chunking: max_size={max_chunk_size}, priority={priority_label}", True)
+                        max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning, _chunking_style = get_agentic_chunk_params(full_transcription[:n_sample_chars], llm_callback=llm_callback)
+                    steps_html[-1] = pipeline_step(5, f"Agentic chunking: max_size={max_chunk_size}, priority={priority_label}", True)
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
                     with st.expander("🧠 Agent brain: how chunking was chosen", expanded=True):
-                        st.caption("The agent looked at a sample and chose these settings for better retrieval (Agentic RAG).")
+                        st.caption("The agent chose how much transcript to sample, then chose chunking (Agentic RAG).")
+                        st.markdown("**Sample size (agent chose):**")
+                        st.info(f"**{n_sample_chars}** characters (of **{total_chars}** total).")
+                        if raw_sample_response:
+                            st.caption("Sample-size decision:")
+                            st.code(raw_sample_response[:400] + ("…" if len(raw_sample_response) > 400 else ""), language=None)
                         st.markdown("**What the agent saw (sample):**")
                         st.text_area("Sample", agent_sample_preview or "(empty)", height=120, disabled=True, key="agent_brain_sample_audio")
                         st.markdown("**Agent's answer:**")
@@ -489,10 +501,10 @@ def audio_processing_page(video_mode: bool = False, llm_callback=None):
                         chunk_progress.progress(1.0, text=f"✓ {total_c} chunks")
                     diagram_placeholder.markdown(advanced_rag_diagram_html("indexing", 3), unsafe_allow_html=True)
                     time.sleep(0.2)
-                    steps_html[-1] = pipeline_step(4, f"Agentic: max_size={max_chunk_size}, priority={priority_label} → {len(text_chunks)} chunks", True)
+                    steps_html[-1] = pipeline_step(5, f"Agentic: max_size={max_chunk_size}, priority={priority_label} → {len(text_chunks)} chunks", True)
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
                     
-                    # Step 5: Embed & store
+                    # Step 6: Embed & store
                     audio_meta = {}
                     if audio_source:
                         audio_meta['source'] = audio_source
@@ -502,7 +514,7 @@ def audio_processing_page(video_mode: bool = False, llm_callback=None):
                         audio_meta['speaker'] = audio_speaker
                     audio_meta['content_type'] = 'video_transcription' if is_video else 'audio_transcription'
                     audio_meta['original_filename'] = uploaded_audio.name
-                    steps_html.append(pipeline_step(5, "Embedding & storing in ChromaDB...", False))
+                    steps_html.append(pipeline_step(6, "Embedding & storing in ChromaDB...", False))
                     diagram_placeholder.markdown(advanced_rag_diagram_html("indexing", 4), unsafe_allow_html=True)
                     time.sleep(0.4)
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
@@ -523,7 +535,7 @@ def audio_processing_page(video_mode: bool = False, llm_callback=None):
                     status_text.empty()
                     diagram_placeholder.markdown(advanced_rag_diagram_html("indexing", 5), unsafe_allow_html=True)
                     time.sleep(0.4)
-                    steps_html[-1] = pipeline_step(5, f"Stored in collection «{chosen_collection_name}»", True)
+                    steps_html[-1] = pipeline_step(6, f"Stored in collection «{chosen_collection_name}»", True)
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
                     status.update(label="Pipeline complete", state="complete")
                     

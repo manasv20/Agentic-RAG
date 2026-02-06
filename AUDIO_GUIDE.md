@@ -74,8 +74,9 @@ Click **"Transcribe and Process Audio"** and wait for:
 1. Audio conversion (if needed)
 2. Audio splitting (if enabled)
 3. Transcription (may take time for long files)
-4. Text chunking
-5. Storage in ChromaDB
+4. **Agent decides how much of the transcript to sample** (full autonomy—no fixed character limit)
+5. **Agent chooses chunk size and separators** from that sample (agentic chunking)
+6. Storage in ChromaDB
 
 ### Step 7: Chat with Your Audio
 Navigate to **"💬 Chat"** and ask questions about the transcribed content!

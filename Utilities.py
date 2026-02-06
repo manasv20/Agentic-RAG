@@ -143,6 +143,48 @@ reasoning=Need enough to detect tables and paragraphs.
     return n, raw_response
 
 
+def get_agentic_sample_chars(total_chars: int, llm_callback=None) -> tuple:
+    """Let the agent decide how many characters to sample from the start of a transcript (audio/video).
+    Returns (n_chars_to_sample, raw_llm_response). n_chars is clamped to [500, min(total_chars, 15000)]."""
+    if total_chars <= 0:
+        return 2800, ""
+    cap = min(total_chars, 15000)
+    prompt = """You are a RAG transcript advisor. An audio or video has been transcribed; the full transcript is {} characters long.
+
+Decide how many characters from the start you want to sample to later choose chunking (size, separators). You have full autonomy: use less for short transcripts, or more to capture variety (speakers, topics, structure).
+
+Reply with exactly one line: sample_chars=N
+- N = integer number of characters to sample (from the start). Must be between 500 and {}.
+Optional second line: reasoning=Your brief reason.
+
+Example: sample_chars=2000
+Example: sample_chars=5000
+reasoning=Need enough to see sentence and paragraph boundaries.
+""".format(total_chars, cap)
+    out_text = ""
+    if callable(llm_callback):
+        try:
+            out_text = (llm_callback(prompt) or "").strip()
+        except Exception:
+            pass
+    if not out_text:
+        try:
+            resp = ollama.chat(model=LLM_MODEL or "gemma3:4b", messages=[{"role": "user", "content": prompt}])
+            out_text = (resp.get("message") or {}).get("content") or ""
+        except Exception:
+            pass
+    raw_response = out_text or "(no response; using default)"
+    n = min(2800, cap)
+    n = max(500, n)
+    m = re.search(r"sample_chars\s*=\s*(\d+)", out_text, re.I)
+    if m:
+        try:
+            n = max(500, min(cap, int(m.group(1))))
+        except ValueError:
+            pass
+    return n, raw_response
+
+
 def get_agentic_chunk_params(sample_text: str, llm_callback=None) -> tuple:
     """Agentic chunking: ask LLM for chunk size, separator priority, and optional chunking_style.
     Returns (max_chunk_size, separators or None, priority_label, sample_preview, raw_llm_response, agent_reasoning, chunking_style).

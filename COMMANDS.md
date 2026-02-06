@@ -80,6 +80,8 @@ streamlit run localragdemo.py
 3. Upload audio file
 4. Configure and transcribe
 
+**Agent autonomy:** For documents the agent decides how many pages to sample; for audio/video the agent decides how much of the transcript (characters) to sample before choosing chunking. No fixed sample sizes—the agent has full control.
+
 ## Testing Commands
 
 ### Test Audio Setup

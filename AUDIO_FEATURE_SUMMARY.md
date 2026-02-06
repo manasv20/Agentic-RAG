@@ -94,7 +94,8 @@ Python script to test:
 ✅ Speech-to-text transcription using Google Speech Recognition
 ✅ Audio splitting for long files (configurable duration)
 ✅ Multi-language support (10 languages)
-✅ Text chunking for ChromaDB storage
+✅ **Agent-decided sample**: The agent chooses how much of the transcript (characters) to sample before chunking—same autonomy as document page sampling
+✅ Text chunking for ChromaDB storage (size/separators chosen by agent from that sample)
 ✅ Collection management (create new or add to existing)
 ✅ Progress tracking with visual feedback
 ✅ Metadata support (source, category, speaker, content_type)

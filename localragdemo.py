@@ -18,6 +18,7 @@ from Utilities import (
     initialize_chroma_db,
     CHROMA_PATH,
     get_agentic_sample_pages,
+    get_agentic_sample_chars,
     get_agentic_chunk_params,
     get_agentic_video_frame_params,
     chunk_by_table_rows,
@@ -721,12 +722,20 @@ def video_full_page():
                                 pass
                         return
                     full_transcription = " ".join(transcriptions)
-                    # Agent: chunking
+                    # Agent: how much transcript to sample, then chunking
+                    total_chars = len(full_transcription)
+                    st.write("🤖 Agent is thinking… (choosing how much transcript to sample).")
+                    with st.spinner("🤖 Agent is thinking… (choosing how much transcript to sample)"):
+                        n_sample_chars, raw_sample_response = get_agentic_sample_chars(total_chars, llm_callback=_llm_for_agentic_chunking)
                     st.write("🤖 Agent is thinking… (choosing chunk size and separators for transcript).")
                     with st.spinner("🤖 Agent is thinking… (choosing chunk size and separators for transcript)"):
-                        max_chunk_size, chunk_separators, priority_label, agent_sample, agent_raw, agent_reasoning, _chunking_style = get_agentic_chunk_params(full_transcription[:2800], llm_callback=_llm_for_agentic_chunking)
+                        max_chunk_size, chunk_separators, priority_label, agent_sample, agent_raw, agent_reasoning, _chunking_style = get_agentic_chunk_params(full_transcription[:n_sample_chars], llm_callback=_llm_for_agentic_chunking)
                     with st.expander("🧠 Agent brain: transcript chunking", expanded=True):
-                        st.caption("The agent looked at a sample and chose these settings for better retrieval (Agentic RAG).")
+                        st.caption("The agent chose how much transcript to sample, then chose chunking (Agentic RAG).")
+                        st.info(f"**{n_sample_chars}** characters sampled (of **{total_chars}** total).")
+                        if raw_sample_response:
+                            st.caption("Sample-size decision:")
+                            st.code(raw_sample_response[:400] + ("…" if len(raw_sample_response) > 400 else ""), language=None)
                         st.text_area("Sample", agent_sample or "(empty)", height=80, disabled=True, key="video_full_agent_sample")
                         st.code(agent_raw, language=None)
                         if agent_reasoning:

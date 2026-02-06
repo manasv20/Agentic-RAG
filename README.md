@@ -6,7 +6,7 @@ A lightweight Retrieval-Augmented Generation (RAG) demo for local document and a
 - **Flexible Storage**: Uses ChromaDB for vector storage (with in-memory fallback)
 - **LLM**: Ollama only for local chat and embeddings
 - **Agentic RAG**: Chat agent can search your docs multiple times before answering (when the model supports tools; otherwise single-shot RAG)
-- **Smart Chunking**: Agentic chunking (LLM picks size/separators from a document sample) plus fixed/recursive strategies
+- **Smart Chunking**: The agent has full autonomy over sampling: for documents it decides how many pages to sample; for audio/video transcripts it decides how many characters to sample. Then the LLM picks chunk size, separators, and style from that sample. Fixed/recursive and table-aware strategies supported.
 - **Audio Transcription**: Process audio/video (meetings, podcasts) and add transcriptions to your knowledge base
 
 Process your PDF documents and audio files, manage multiple collections, and chat with your content using retrieval-augmented generation — all running locally on your machine.
@@ -182,8 +182,9 @@ The Audio Processing page allows you to transcribe audio files and add them to y
      2. Split into manageable chunks (if enabled)
      3. Transcribe each chunk using Google Speech Recognition
      4. Display the full transcription
-     5. Split text into chunks
-     6. Store in ChromaDB with metadata
+     5. **Agent decides how much of the transcript to sample** (full autonomy)
+     6. **Agent chooses chunk size and separators** from that sample
+     7. Store in ChromaDB with metadata
    - Watch the progress bar for transcription and storage
    - Preview the transcription and text chunks
    - Use "Go to Chat" to ask questions about the audio content
@@ -219,6 +220,7 @@ The Document Processing page is where you add documents to your knowledge base:
 
 4. **Process the Document**:
    - Click "Extract Text and Process Document"
+   - **The agent first decides how many pages to sample** (full autonomy—no fixed page count), then chooses chunk size, separators, and style from that sample
    - Watch the progress bar as chunks are processed
    - When done, you'll see a preview of the first few chunks
    - Use "Go to Chat" to start asking questions, or "Clear & Upload Another" to add more documents
