@@ -102,10 +102,51 @@ def recursive_chunking(document: str, max_chunk_size: int, separators: Optional[
     
     return split_recursively(document, 0)
 
+
+def get_agentic_sample_pages(total_pages: int, llm_callback=None) -> tuple:
+    """Let the agent decide how many pages to sample from the start of the document.
+    Returns (n_pages_to_sample, raw_llm_response). n_pages is clamped to [1, total_pages]."""
+    if total_pages <= 0:
+        return 1, ""
+    prompt = """You are a RAG document advisor. A PDF has been uploaded with {} page(s).
+
+Decide how many pages from the start you want to sample to later choose chunking (size, separators, style). You have full autonomy: use 1 page for a short doc, or more to capture variety (tables, sections, prose).
+
+Reply with exactly one line: sample_pages=N
+- N = integer number of pages to sample (from the start). Must be between 1 and {}.
+Optional second line: reasoning=Your brief reason.
+
+Example: sample_pages=3
+Example: sample_pages=5
+reasoning=Need enough to detect tables and paragraphs.
+""".format(total_pages, total_pages)
+    out_text = ""
+    if callable(llm_callback):
+        try:
+            out_text = (llm_callback(prompt) or "").strip()
+        except Exception:
+            pass
+    if not out_text:
+        try:
+            resp = ollama.chat(model=LLM_MODEL or "gemma3:4b", messages=[{"role": "user", "content": prompt}])
+            out_text = (resp.get("message") or {}).get("content") or ""
+        except Exception:
+            pass
+    raw_response = out_text or "(no response; using default)"
+    n = max(1, min(total_pages, 10))  # default
+    m = re.search(r"sample_pages\s*=\s*(\d+)", out_text, re.I)
+    if m:
+        try:
+            n = max(1, min(total_pages, int(m.group(1))))
+        except ValueError:
+            pass
+    return n, raw_response
+
+
 def get_agentic_chunk_params(sample_text: str, llm_callback=None) -> tuple:
-    """Agentic chunking: ask LLM for chunk size and separator priority.
-    Returns (max_chunk_size, separators or None, priority_label, sample_preview, raw_llm_response, agent_reasoning).
-    sample_preview, raw_llm_response, agent_reasoning are for UI (agent brain); may be empty strings."""
+    """Agentic chunking: ask LLM for chunk size, separator priority, and optional chunking_style.
+    Returns (max_chunk_size, separators or None, priority_label, sample_preview, raw_llm_response, agent_reasoning, chunking_style).
+    chunking_style: paragraph|sentence|comma|fixed|table_row|table_section (table_* for menus/tables)."""
     sample = (sample_text or "")[:2800].strip()
     sample_preview = (sample[:500] + "..." if len(sample) > 500 else sample) if sample else ""
     # #region agent log
@@ -124,20 +165,25 @@ def get_agentic_chunk_params(sample_text: str, llm_callback=None) -> tuple:
         except Exception:
             pass
         # #endregion
-        return 2000, ["\n\n", ". ", "? ", "! ", ", "], "paragraph", "", "", ""
+        return 2000, ["\n\n", ". ", "? ", "! ", ", "], "paragraph", "", "", "paragraph"
     prompt = """You are a RAG chunking advisor. Look at the document sample and decide how to chunk it for retrieval.
 
-Think step by step: Is the text paragraph-heavy, sentence-heavy, or very granular? What chunk size would keep useful context without being too long?
+Think step by step: Is the text paragraph-heavy, sentence-heavy, a table/menu (rows with numbers like calories, protein), or very granular?
 
 Output exactly two lines:
-Line 1: max_chunk_size=NUMBER separator_priority=WORD
+Line 1: max_chunk_size=NUMBER separator_priority=WORD chunking_style=STYLE
 - NUMBER: integer between 500 and 3000 (character limit per chunk).
-- WORD: one of paragraph, sentence, comma, fixed (paragraph=break by paragraphs first; sentence=sentences first; comma=commas first; fixed=fixed size only).
-Line 2: reasoning=Your brief explanation of why you chose this (one short sentence).
+- WORD: one of paragraph, sentence, comma, fixed.
+- STYLE: one of paragraph, sentence, comma, fixed, table_row, table_section. Use table_row when the sample looks like a table or menu with rows (e.g. dish name, Page No., Calories, Protein). Use table_section when there are clear section headers (e.g. Breakfast, Starters, Main Course). Otherwise use the same as WORD.
+Line 2: reasoning=Your brief explanation (one short sentence).
 
-Example:
-max_chunk_size=1500 separator_priority=paragraph
-reasoning=Sample has clear paragraphs; 1500 chars keeps 1-2 paragraphs per chunk for context.
+Example for prose:
+max_chunk_size=1500 separator_priority=paragraph chunking_style=paragraph
+reasoning=Sample has clear paragraphs; 1500 chars keeps 1-2 paragraphs per chunk.
+
+Example for a menu/table:
+max_chunk_size=800 separator_priority=paragraph chunking_style=table_row
+reasoning=Sample is a table with dish names and nutrition; row-based chunking preserves each entry.
 
 Document sample:
 """
@@ -175,6 +221,12 @@ Document sample:
     m = re.search(r"separator_priority\s*=\s*(\w+)", out_text, re.I)
     if m:
         priority = m.group(1).lower()
+    chunking_style = "paragraph"
+    m_style = re.search(r"chunking_style\s*=\s*(\w+)", out_text, re.I)
+    if m_style:
+        cs = m_style.group(1).lower()
+        if cs in ("paragraph", "sentence", "comma", "fixed", "table_row", "table_section"):
+            chunking_style = cs
     sep_map = {
         "paragraph": ["\n\n", ". ", "? ", "! ", ", "],
         "sentence": [". ", "? ", "! ", "\n\n", ", "],
@@ -182,8 +234,8 @@ Document sample:
     }
     separators = sep_map.get(priority, sep_map["paragraph"])
     if priority == "fixed":
-        return max_size, None, "fixed", sample_preview, raw_llm_response, agent_reasoning
-    return max_size, separators, priority, sample_preview, raw_llm_response, agent_reasoning
+        return max_size, None, "fixed", sample_preview, raw_llm_response, agent_reasoning, chunking_style
+    return max_size, separators, priority, sample_preview, raw_llm_response, agent_reasoning, chunking_style
 
 
 def get_agentic_video_frame_params(duration_sec: float, llm_callback=None) -> tuple:
@@ -236,6 +288,102 @@ Your two-line output:"""
     return fps, max_frames, raw_llm_response, agent_reasoning
 
 
+def chunk_by_table_rows(text: str, max_chunk_size: int) -> List[str]:
+    """Split table/menu-like text by rows (lines), merging into chunks up to max_chunk_size."""
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return []
+    chunks = []
+    current = []
+    current_len = 0
+    for line in lines:
+        line_len = len(line) + 1
+        if current_len + line_len > max_chunk_size and current:
+            chunks.append("\n".join(current))
+            current = []
+            current_len = 0
+        current.append(line)
+        current_len += line_len
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+def chunk_by_table_section(text: str, max_chunk_size: int) -> List[str]:
+    """Split by sections (double newline or header-like lines), then merge up to max_chunk_size."""
+    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+    if not blocks:
+        return []
+    chunks = []
+    current = []
+    current_len = 0
+    for block in blocks:
+        block_len = len(block) + 2
+        if current_len + block_len > max_chunk_size and current:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_len = 0
+        current.append(block)
+        current_len += block_len
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks
+
+
+def extract_chunk_metadata_llm(chunk_text: str, llm_callback) -> dict:
+    """Use LLM to extract structured metadata from a menu/recipe chunk. Returns dict for Chroma (calories, protein, category, diet_type)."""
+    if not callable(llm_callback):
+        return {}
+    prompt = """From this menu or recipe text, extract structured data. Return ONLY a valid JSON object, no other text.
+Keys: "dish_name" (string or null), "calories" (integer or null), "protein" (integer or null), "category" (string e.g. Breakfast, Starters - Veg), "diet_type" (one of: "veg", "non-veg", "unknown").
+If a value is not found use null. Example: {"dish_name": "Chicken Gravy", "calories": 320, "protein": 28, "category": "Main Course - Non-Veg", "diet_type": "non-veg"}
+
+Text:
+"""
+    prompt += (chunk_text or "")[:1500] + "\n\nJSON:"
+    try:
+        out = (llm_callback(prompt) or "").strip()
+        # Extract JSON (handle markdown code block)
+        if "```" in out:
+            m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", out, re.DOTALL)
+            if m:
+                out = m.group(1)
+        m = re.search(r"\{[^{}]*\}", out)
+        if m:
+            data = json.loads(m.group(0))
+            result = {}
+            if "calories" in data and data["calories"] is not None:
+                try:
+                    result["calories"] = int(data["calories"])
+                except (TypeError, ValueError):
+                    pass
+            if "protein" in data and data["protein"] is not None:
+                try:
+                    result["protein"] = int(data["protein"])
+                except (TypeError, ValueError):
+                    pass
+            if data.get("category") and isinstance(data["category"], str):
+                result["category"] = data["category"][:200]
+            if data.get("diet_type") and isinstance(data["diet_type"], str):
+                dt = data["diet_type"].lower().replace(" ", "")
+                result["diet_type"] = "veg" if "veg" in dt and "non" not in dt else ("non-veg" if "non" in dt or "nonveg" in dt else "unknown")
+            return result
+    except Exception:
+        pass
+    return {}
+
+
+def extract_metadata_batch(chunks: List[str], llm_callback, batch_size: int = 3) -> List[dict]:
+    """Extract metadata for each chunk via LLM (in small batches for quality). Returns list of dicts, one per chunk."""
+    results = []
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i : i + batch_size]
+        for j, chunk in enumerate(batch):
+            meta = extract_chunk_metadata_llm(chunk, llm_callback)
+            results.append(meta)
+    return results
+
+
 def markdown_chunking(document: str) -> List[str]:
     """Split document at markdown headers.
     
@@ -280,19 +428,19 @@ def get_ollama_embedding_function(model_name: str):
 
     return OllamaEmbeddingFunction(model_name)
 
-def initialize_chroma_db(documents: List[str], batch_size: int = 10, progress_callback=None, document_metadata: dict | None = None, collection_name: str | None = None):
+def initialize_chroma_db(documents: List[str], batch_size: int = 10, progress_callback=None, document_metadata: dict | None = None, metadatas_per_chunk: Optional[List[dict]] = None, collection_name: str | None = None):
     """
     Initialize a ChromaDB collection with the provided documents.
     Tries upsert first with different parameter orders for compatibility,
     falls back to add if upsert fails.
-    
+
     Args:
         documents: list of strings to add (already chunked as desired)
         batch_size: how many documents to process in each batch (default 10)
         progress_callback: optional function called after each batch. Preferred signature:
             progress_callback(current:int, total:int)
-        For backward compatibility a single-float argument (ratio) is also supported.
         document_metadata: optional dict to attach as metadata to every document/chunk
+        metadatas_per_chunk: optional list of dicts, one per chunk; merged with document_metadata per chunk
     Returns:
         chroma collection object
     """
@@ -337,9 +485,23 @@ def initialize_chroma_db(documents: List[str], batch_size: int = 10, progress_ca
                 for j, doc in enumerate(batch)
             ]
             
-            # Prepare metadata for this batch. ChromaDB rejects empty dict {}; omit metadatas when none.
-            has_meta = document_metadata and len(document_metadata) > 0
-            batch_metadatas = [document_metadata.copy() for _ in batch] if has_meta else None
+            # Prepare metadata for this batch: merge document_metadata with per-chunk metadatas if provided
+            batch_metadatas = None
+            if metadatas_per_chunk is not None and len(metadatas_per_chunk) == len(documents):
+                batch_per = metadatas_per_chunk[i : i + len(batch)]
+                base = (document_metadata or {}).copy()
+                merged = []
+                for j, meta in enumerate(batch_per):
+                    m = base.copy()
+                    if meta and isinstance(meta, dict):
+                        for k, v in meta.items():
+                            if v is not None and isinstance(v, (str, int, float, bool)):
+                                m[k] = v
+                    if m:
+                        merged.append(m)
+                batch_metadatas = merged if merged else None
+            if batch_metadatas is None and document_metadata and len(document_metadata) > 0:
+                batch_metadatas = [document_metadata.copy() for _ in batch]
 
             # Try to upsert the batch (omit metadatas when none to avoid "Expected metadata to be a non-empty dict, got {}")
             try:

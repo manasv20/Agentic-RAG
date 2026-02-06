@@ -12,7 +12,19 @@ except ImportError:
 
 import streamlit as st
 import PyPDF2
-from Utilities import fixed_size_chunking, recursive_chunking, initialize_chroma_db, CHROMA_PATH, get_agentic_chunk_params, get_agentic_video_frame_params, LLM_MODEL
+from Utilities import (
+    fixed_size_chunking,
+    recursive_chunking,
+    initialize_chroma_db,
+    CHROMA_PATH,
+    get_agentic_sample_pages,
+    get_agentic_chunk_params,
+    get_agentic_video_frame_params,
+    chunk_by_table_rows,
+    chunk_by_table_section,
+    extract_metadata_batch,
+    LLM_MODEL,
+)
 import logging
 import time
 from datetime import datetime
@@ -412,27 +424,32 @@ def document_processing_page():
                     live_log = st.empty()
                     live_chunks_container = st.empty()
 
-                    # Agentic chunking: get sample from first page(s) and ask LLM for params
+                    # Agent decides how many pages to sample (full autonomy)
+                    live_log.markdown(
+                        '<div class="pipeline-log">'
+                        '<span class="pipeline-line pipeline-running">🤖 Agent is thinking… (choosing how many pages to sample)</span>'
+                        '</div>', unsafe_allow_html=True
+                    )
+                    with st.spinner("🤖 Agent is thinking… (choosing how many pages to sample)"):
+                        n_sample_pages, raw_sample_response = get_agentic_sample_pages(total_pages, llm_callback=_llm_for_agentic_chunking)
+                    live_log.markdown(
+                        f'<div class="pipeline-log">'
+                        f'<span class="pipeline-line pipeline-done">✓ Agent chose to sample **{n_sample_pages}** pages (of {total_pages})</span>'
+                        f'</div>', unsafe_allow_html=True
+                    )
                     sample_text = ""
-                    for p in reader.pages[:2]:
+                    for p in reader.pages[:n_sample_pages]:
                         try:
                             sample_text += (p.extract_text() or "") + "\n"
                         except Exception:
                             pass
-                    # #region agent log
-                    try:
-                        import json
-                        _d = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H1", "location": "localragdemo.py:after_sample", "message": "sample_text after first 2 pages", "data": {"len_sample_text": len(sample_text), "sample_preview": (sample_text[:100] if sample_text else "(empty)"), "empty": not (sample_text or "").strip()}, "timestamp": int(time.time() * 1000)}
-                        open("/Users/manasverma/Desktop/RAG Workshop/.cursor/debug.log", "a").write(json.dumps(_d) + "\n")
-                    except Exception:
-                        pass
-                    # #endregion
                     live_log.markdown(
                         '<div class="pipeline-log">'
                         '<span class="pipeline-line pipeline-running">🤖 Agent is thinking… (choosing chunk size and separators for retrieval)</span>'
                         '</div>', unsafe_allow_html=True
                     )
-                    max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning = get_agentic_chunk_params(sample_text, llm_callback=_llm_for_agentic_chunking)
+                    with st.spinner("🤖 Agent is thinking… (choosing chunk size and separators for retrieval)"):
+                        max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning, chunking_style = get_agentic_chunk_params(sample_text, llm_callback=_llm_for_agentic_chunking)
                     # #region agent log
                     try:
                         import json
@@ -443,55 +460,72 @@ def document_processing_page():
                     # #endregion
                     live_log.markdown(
                         f'<div class="pipeline-log">'
-                        f'<span class="pipeline-line pipeline-done">✓ Agentic chunking: max_size={max_chunk_size}, priority={priority_label}</span>'
+                        f'<span class="pipeline-line pipeline-done">✓ Agentic chunking: max_size={max_chunk_size}, priority={priority_label}, style={chunking_style}</span>'
                         f'</div>', unsafe_allow_html=True
                     )
                     with st.expander("🧠 Agent brain: how chunking was chosen", expanded=True):
-                        st.caption("The agent looked at a sample and chose these settings for better retrieval (Agentic RAG).")
+                        st.caption("The agent chose how many pages to sample, then looked at that sample and chose chunking (Agentic RAG).")
+                        st.markdown("**Sample size (agent chose):**")
+                        st.info(f"**{n_sample_pages}** pages (of **{total_pages}** total).")
+                        if raw_sample_response:
+                            st.caption("Sample-size decision:")
+                            st.code(raw_sample_response[:400] + ("…" if len(raw_sample_response) > 400 else ""), language=None)
                         st.markdown("**What the agent saw (sample):**")
                         st.text_area("Sample", agent_sample_preview or "(empty)", height=120, disabled=True, key="agent_brain_sample_doc")
-                        st.markdown("**Agent's answer:**")
+                        st.markdown("**Chunking answer:**")
                         st.code(agent_raw_response, language=None)
                         if agent_reasoning:
                             st.markdown("**Agent's reasoning:**")
                             st.info(agent_reasoning)
                         st.markdown("**What we're using:**")
-                        st.info(f"max_size={max_chunk_size} chars, priority={priority_label}" + (" (fixed-size chunks)" if chunk_separators is None else ""))
+                        st.info(f"max_size={max_chunk_size} chars, priority={priority_label}, chunking_style={chunking_style}" + (" (fixed-size chunks)" if chunk_separators is None else ""))
                     time.sleep(0.3)
 
-                    # Collect chunks from all pages using agent-chosen params
+                    # Collect chunks: table-aware (full doc) or page-by-page
                     documents = []
-                    for page_idx, page in enumerate(reader.pages):
-                        diagram_ph.markdown(advanced_rag_diagram_html("indexing", 1), unsafe_allow_html=True)
-                        live_log.markdown(
-                            f'<div class="pipeline-log">'
-                            f'<span class="pipeline-line pipeline-running">► Page {page_idx + 1}/{total_pages} → {len(documents)} chunks so far</span>'
-                            f'</div>', unsafe_allow_html=True
-                        )
-                        time.sleep(0.15)
-                        try:
-                            page_text = page.extract_text()
-                            if page_text:
-                                if chunk_separators is not None:
-                                    chunks = recursive_chunking(page_text, max_chunk_size, chunk_separators)
+                    metadatas_per_chunk = None
+                    chunk_progress = st.progress(0, text="Chunking…")
+                    chunk_status = st.empty()
+                    with st.spinner("Chunking in progress…"):
+                        if chunking_style in ("table_row", "table_section"):
+                            full_doc_text = ""
+                            for page in reader.pages:
+                                try:
+                                    full_doc_text += (page.extract_text() or "") + "\n"
+                                except Exception:
+                                    pass
+                            if full_doc_text.strip():
+                                if chunking_style == "table_row":
+                                    documents = chunk_by_table_rows(full_doc_text, max_chunk_size)
                                 else:
-                                    chunks = fixed_size_chunking(page_text, max_chunk_size)
-                                documents.extend(chunks)
-                                logger.debug(f"Page {page_idx + 1}: created {len(chunks)} chunks")
-                                # Live chunk preview: show last few chunk previews
-                                preview_lines = []
-                                for i, c in enumerate(documents[-5:]):
-                                    idx = len(documents) - 5 + i
-                                    preview_lines.append(f"Chunk {idx + 1}: {c[:80].replace(chr(10), ' ')}...")
-                                live_chunks_container.markdown(
-                                    '<div class="pipeline-log" style="margin-top:0.5rem;">'
-                                    + "".join(f'<span class="pipeline-line pipeline-done">{s}</span>' for s in preview_lines[-5:])
-                                    + '</div>', unsafe_allow_html=True
-                                )
-                            else:
-                                logger.warning(f"Page {page_idx + 1}: No text extracted")
-                        except Exception as page_error:
-                            logger.error(f"Error processing page {page_idx + 1}: {str(page_error)}", exc_info=True)
+                                    documents = chunk_by_table_section(full_doc_text, max_chunk_size)
+                                chunk_progress.progress(0.5, text="Extracting metadata per chunk…")
+                                chunk_status.caption(f"**{len(documents)}** table chunks → extracting metadata (LLM)")
+                                metadatas_per_chunk = extract_metadata_batch(documents, _llm_for_agentic_chunking, batch_size=3)
+                            chunk_progress.progress(1.0, text="Chunking complete")
+                            chunk_status.caption(f"✓ **{len(documents)}** chunks (style={chunking_style})")
+                        else:
+                            for page_idx, page in enumerate(reader.pages):
+                                diagram_ph.markdown(advanced_rag_diagram_html("indexing", 1), unsafe_allow_html=True)
+                                pct = (page_idx + 1) / total_pages if total_pages else 0
+                                chunk_progress.progress(min(1.0, pct), text=f"Chunking… Page {page_idx + 1} of {total_pages}")
+                                chunk_status.caption(f"**{len(documents)}** chunks so far")
+                                time.sleep(0.08)
+                                try:
+                                    page_text = page.extract_text()
+                                    if page_text:
+                                        if chunk_separators is not None:
+                                            chunks = recursive_chunking(page_text, max_chunk_size, chunk_separators)
+                                        else:
+                                            chunks = fixed_size_chunking(page_text, max_chunk_size)
+                                        documents.extend(chunks)
+                                        logger.debug(f"Page {page_idx + 1}: created {len(chunks)} chunks")
+                                    else:
+                                        logger.warning(f"Page {page_idx + 1}: No text extracted")
+                                except Exception as page_error:
+                                    logger.error(f"Error processing page {page_idx + 1}: {str(page_error)}", exc_info=True)
+                            chunk_progress.progress(1.0, text="Chunking complete")
+                            chunk_status.caption(f"✓ **{len(documents)}** chunks from {total_pages} pages")
 
                     logger.info(f"Text extraction complete. Total chunks created: {len(documents)}")
                     st.session_state["last_doc_chunk_count"] = len(documents)
@@ -537,6 +571,7 @@ def document_processing_page():
                                 batch_size=10,  # process 10 docs at a time
                                 progress_callback=update_progress,
                                 document_metadata=doc_meta if doc_meta else None,
+                                metadatas_per_chunk=metadatas_per_chunk,
                                 collection_name=chosen_collection_name
                             )
                             logger.info(f"ChromaDB processing complete. Collection: {chosen_collection_name}")
@@ -652,7 +687,8 @@ def video_full_page():
                 with st.status("Processing video: audio + visual…", expanded=True) as status:
                     # Agent: frame sampling
                     st.write("Video duration: **{:.1f}s**. 🤖 Agent is thinking… (choosing frame sampling for visual search).".format(duration_sec))
-                    fps, max_frames, raw_frame_resp, frame_reasoning = get_agentic_video_frame_params(duration_sec, llm_callback=_llm_for_agentic_chunking)
+                    with st.spinner("🤖 Agent is thinking… (choosing frame sampling for visual search)"):
+                        fps, max_frames, raw_frame_resp, frame_reasoning = get_agentic_video_frame_params(duration_sec, llm_callback=_llm_for_agentic_chunking)
                     with st.expander("🧠 Agent brain: frame sampling", expanded=True):
                         st.caption("The agent looked at the duration and chose these settings for better retrieval (Agentic RAG).")
                         st.info("Duration: {:.1f}s".format(duration_sec))
@@ -687,7 +723,8 @@ def video_full_page():
                     full_transcription = " ".join(transcriptions)
                     # Agent: chunking
                     st.write("🤖 Agent is thinking… (choosing chunk size and separators for transcript).")
-                    max_chunk_size, chunk_separators, priority_label, agent_sample, agent_raw, agent_reasoning = get_agentic_chunk_params(full_transcription[:2800], llm_callback=_llm_for_agentic_chunking)
+                    with st.spinner("🤖 Agent is thinking… (choosing chunk size and separators for transcript)"):
+                        max_chunk_size, chunk_separators, priority_label, agent_sample, agent_raw, agent_reasoning, _chunking_style = get_agentic_chunk_params(full_transcription[:2800], llm_callback=_llm_for_agentic_chunking)
                     with st.expander("🧠 Agent brain: transcript chunking", expanded=True):
                         st.caption("The agent looked at a sample and chose these settings for better retrieval (Agentic RAG).")
                         st.text_area("Sample", agent_sample or "(empty)", height=80, disabled=True, key="video_full_agent_sample")

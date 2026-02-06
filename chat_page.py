@@ -328,7 +328,28 @@ def chat_page(collection=None):
                 tc_list = list(tool_calls) if hasattr(tool_calls, "__iter__") and not isinstance(tool_calls, dict) else [tool_calls]
                 assistant_msg = {"role": "assistant", "content": content}
                 if tc_list:
-                    assistant_msg["tool_calls"] = [{"id": str(i), "function": {"name": (getattr(t, "function", t) or {}).get("name") if hasattr(t, "function") else (t.get("function") or {}).get("name"), "arguments": str(getattr(getattr(t, "function", None) or {}, "arguments", t.get("function", {}).get("arguments") or {}))} if isinstance(getattr(t, "function", t) or t.get("function"), dict) else {"name": getattr(getattr(t, "function", None), "name", "search_documents"), "arguments": str(getattr(getattr(t, "function", None), "arguments", {}))}} for i, t in enumerate(tc_list)]
+                    # #region agent log
+                    import json as _json
+                    _raw = getattr(getattr(tc_list[0], "function", None) or {}, "arguments", tc_list[0].get("function", {}).get("arguments") if isinstance(tc_list[0], dict) else {})
+                    try:
+                        _d = {"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H1", "location": "chat_page.py:tool_calls_args", "message": "arguments type before build", "data": {"type": type(_raw).__name__, "repr": str(_raw)[:80]}, "timestamp": int(__import__("time").time() * 1000)}
+                        open("/Users/manasverma/Desktop/RAG Workshop/.cursor/debug.log", "a").write(_json.dumps(_d) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
+                    def _tc_args(t, i):
+                        fn = getattr(t, "function", None) or (t.get("function") if isinstance(t, dict) else {})
+                        name = (fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)) or "search_documents"
+                        args_val = getattr(fn, "arguments", None) if hasattr(fn, "arguments") else (fn.get("arguments") if isinstance(fn, dict) else {})
+                        if isinstance(args_val, str):
+                            try:
+                                args_val = _json.loads(args_val)
+                            except Exception:
+                                args_val = {}
+                        if not isinstance(args_val, dict):
+                            args_val = {}
+                        return {"id": str(i), "function": {"name": name, "arguments": args_val}}
+                    assistant_msg["tool_calls"] = [_tc_args(t, i) for i, t in enumerate(tc_list)]
                 messages.append(assistant_msg)
                 for tc in tc_list:
                     fn = getattr(tc, "function", None) or (tc.get("function") if isinstance(tc, dict) else {})

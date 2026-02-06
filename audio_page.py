@@ -459,7 +459,8 @@ def audio_processing_page(video_mode: bool = False, llm_callback=None):
                     # Step 4: Chunk text — agentic chunking (LLM chooses size & separators)
                     steps_html.append(pipeline_step(4, "🤖 Agent is thinking… (choosing chunk size and separators)", False))
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
-                    max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning = get_agentic_chunk_params(full_transcription[:2800], llm_callback=llm_callback)
+                    with st.spinner("🤖 Agent is thinking… (choosing chunk size and separators)"):
+                        max_chunk_size, chunk_separators, priority_label, agent_sample_preview, agent_raw_response, agent_reasoning, _chunking_style = get_agentic_chunk_params(full_transcription[:2800], llm_callback=llm_callback)
                     steps_html[-1] = pipeline_step(4, f"Agentic chunking: max_size={max_chunk_size}, priority={priority_label}", True)
                     pipeline_log.markdown('<div class="pipeline-log">' + "".join(steps_html) + "</div>", unsafe_allow_html=True)
                     with st.expander("🧠 Agent brain: how chunking was chosen", expanded=True):
@@ -478,14 +479,14 @@ def audio_processing_page(video_mode: bool = False, llm_callback=None):
                     else:
                         text_chunks = fixed_size_chunking(full_transcription, max_chunk_size)
                     st.session_state["last_audio_chunk_count"] = len(text_chunks)
-                    live_chunks_ph = st.empty()
-                    for ci, c in enumerate(text_chunks):
-                        live_chunks_ph.markdown(
-                            '<div class="pipeline-log" style="margin-top:0.35rem;">'
-                            + "".join(f'<span class="pipeline-line pipeline-done">Chunk {i+1}: {ch[:70].replace(chr(10), " ")}...</span>' for i, ch in enumerate(text_chunks[:ci + 1][-6:]))
-                            + '</div>', unsafe_allow_html=True
-                        )
-                        time.sleep(0.08)
+                    # Spinner UX: show progress, not a train of chunk lines
+                    chunk_progress = st.progress(0, text="Chunking…")
+                    with st.spinner("Chunking in progress…"):
+                        total_c = len(text_chunks)
+                        for ci in range(total_c):
+                            chunk_progress.progress((ci + 1) / total_c if total_c else 1.0, text=f"Chunking… {ci + 1} of {total_c} chunks")
+                            time.sleep(0.04)
+                        chunk_progress.progress(1.0, text=f"✓ {total_c} chunks")
                     diagram_placeholder.markdown(advanced_rag_diagram_html("indexing", 3), unsafe_allow_html=True)
                     time.sleep(0.2)
                     steps_html[-1] = pipeline_step(4, f"Agentic: max_size={max_chunk_size}, priority={priority_label} → {len(text_chunks)} chunks", True)

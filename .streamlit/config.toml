@@ -1,10 +1,11 @@
 [theme]
-primaryColor = "#0ea5e9"
-backgroundColor = "#f1f5f9"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#0f172a"
+# Dark + blue (live-stream friendly, high contrast)
+primaryColor = "#58a6ff"
+backgroundColor = "#0f1419"
+secondaryBackgroundColor = "#1e2329"
+textColor = "#e6edf3"
 font = "sans serif"
-base = "light"
+base = "dark"
 
 [server]
 headless = true
