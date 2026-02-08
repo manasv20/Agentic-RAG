@@ -28,8 +28,17 @@ from Utilities import (
 )
 import logging
 import time
+import json
 from datetime import datetime
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
+_DEBUG_LOG_PATH = Path(__file__).resolve().parent.parent / ".cursor" / "debug.log"
+def _dlog(hypothesis_id: str, location: str, message: str, data: dict):
+    try:
+        with open(_DEBUG_LOG_PATH, "a") as f:
+            f.write(json.dumps({"hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": int(time.time() * 1000), "runId": "video_workflow"}) + "\n")
+    except Exception:
+        pass
 
 # Configure logging
 log_dir = "logs"
@@ -693,11 +702,20 @@ def video_full_page():
         if st.button("Process video (audio + visual)", type="primary", key="video_full_btn"):
             temp_files = []
             try:
+                # #region agent log
+                _dlog("H1", "localragdemo.py:video_temp", "video workflow start", {"uploaded_name": uploaded.name, "chosen_name": chosen_name})
+                # #endregion
                 with tempfile.NamedTemporaryFile(delete=False, suffix="." + (uploaded.name.split(".")[-1] or "mp4")) as tmp:
                     tmp.write(uploaded.read())
                     video_path = tmp.name
                 temp_files.append(video_path)
+                # #region agent log
+                _dlog("H1", "localragdemo.py:before_duration", "before get_video_duration", {"video_path": video_path, "exists": os.path.exists(video_path)})
+                # #endregion
                 duration_sec = get_video_duration(video_path)
+                # #region agent log
+                _dlog("H1", "localragdemo.py:after_duration", "after get_video_duration", {"duration_sec": duration_sec})
+                # #endregion
                 with st.status("Processing video: audio + visual…", expanded=True) as status:
                     # Agent: frame sampling
                     st.write("Video duration: **{:.1f}s**. 🤖 Agent is thinking… (choosing frame sampling for visual search).".format(duration_sec))
@@ -711,9 +729,17 @@ def video_full_page():
                             st.info("**Reasoning:** " + frame_reasoning)
                         st.info("Using: fps={}, max_frames={}".format(fps, max_frames))
                     # Extract audio and transcribe
+                    st.write("Extracting audio from video… (this can take a minute for long videos)")
                     file_format = uploaded.name.split(".")[-1].lower()
-                    with open(video_path, "rb") as f:
-                        wav_path = extract_audio_from_video(f, file_format)
+                    # #region agent log
+                    _dlog("H2", "localragdemo.py:before_extract_audio", "before extract_audio_from_video", {"file_format": file_format})
+                    # #endregion
+                    with st.spinner("Extracting audio from video…"):
+                        with open(video_path, "rb") as f:
+                            wav_path = extract_audio_from_video(f, file_format)
+                    # #region agent log
+                    _dlog("H2", "localragdemo.py:after_extract_audio", "after extract_audio_from_video", {"wav_path": wav_path})
+                    # #endregion
                     temp_files.append(wav_path)
                     audio_chunks = split_audio_by_duration(wav_path, 60) if chunk_audio else [wav_path]
                     temp_files.extend([c for c in audio_chunks if c != wav_path])
@@ -724,6 +750,9 @@ def video_full_page():
                             transcriptions.append(text)
                         except Exception as e:
                             logger.warning("Transcribe chunk %s failed: %s", i + 1, e)
+                    # #region agent log
+                    _dlog("H4", "localragdemo.py:after_transcribe", "after transcribe loop", {"num_chunks": len(audio_chunks), "num_transcriptions": len(transcriptions)})
+                    # #endregion
                     if not transcriptions:
                         status.update(label="Transcription failed", state="error")
                         st.error("No audio could be transcribed. Check language and try again.")
@@ -759,7 +788,14 @@ def video_full_page():
                     else:
                         text_chunks = fixed_size_chunking(full_transcription, max_chunk_size)
                     # Create CLIP collection and add transcript (documents → CLIP text embeddings)
+                    # #region agent log
+                    _dlog("H3", "localragdemo.py:before_clip", "before get_clip_text_embedding_function", {})
+                    # #endregion
                     clip_fn = get_clip_text_embedding_function()
+                    # #region agent log
+                    _dlog("H3", "localragdemo.py:after_clip", "after get_clip_text_embedding_function", {})
+                    _dlog("H5", "localragdemo.py:before_chroma", "before ChromaDB client/collection", {"CHROMA_PATH": CHROMA_PATH, "chosen_name": chosen_name})
+                    # #endregion
                     client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(anonymized_telemetry=False))
                     collection = client.get_or_create_collection(name=chosen_name, embedding_function=clip_fn)
                     transcript_meta = {"content_type": "video_transcription", "original_filename": uploaded.name}
@@ -768,12 +804,18 @@ def video_full_page():
                     transcript_ids = ["transcript_{}".format(i) for i in range(len(text_chunks))]
                     transcript_metadatas = [{**transcript_meta, "chunk_index": i} for i in range(len(text_chunks))]
                     collection.add(ids=transcript_ids, documents=text_chunks, metadatas=transcript_metadatas)
-                    # Add frames to same collection
+                    # #region agent log
+                    _dlog("H5", "localragdemo.py:after_transcript_add", "after collection.add transcript", {"num_chunks": len(text_chunks)})
+                    _dlog("H3", "localragdemo.py:before_add_frames", "before add_frames_to_existing_collection", {"fps": fps, "max_frames": max_frames})
+                    # #endregion
                     progress_ph = st.progress(0)
                     def _prog(c, t):
                         if t:
                             progress_ph.progress(min(1.0, c / t))
                     num_frames = add_frames_to_existing_collection(collection, video_path, fps=fps, max_frames=max_frames, progress_callback=_prog)
+                    # #region agent log
+                    _dlog("H3", "localragdemo.py:after_add_frames", "after add_frames_to_existing_collection", {"num_frames": num_frames})
+                    # #endregion
                     progress_ph.progress(1.0)
                     status.update(label="Done", state="complete")
                     st.session_state["last_video_full_chunk_count"] = len(text_chunks)
@@ -790,6 +832,9 @@ def video_full_page():
                         except Exception:
                             st.experimental_rerun()
             except Exception as e:
+                # #region agent log
+                _dlog("H_ALL", "localragdemo.py:video_except", "video workflow exception", {"type": type(e).__name__, "message": str(e)})
+                # #endregion
                 logger.exception("Video full processing failed")
                 st.error(str(e))
             finally:

@@ -45,6 +45,13 @@ def extract_audio_from_video(video_file, video_format: str) -> str:
     Returns:
         path to temporary WAV file
     """
+    # #region agent log
+    try:
+        _log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+        open(_log_path, "a").write(__import__("json").dumps({"hypothesisId": "H2", "location": "audio_page.py:extract_audio_entry", "message": "extract_audio_from_video entry", "data": {"video_format": video_format}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     if AudioSegment is None:
         raise ImportError("pydub is required for video. Install: pip install pydub. Also need ffmpeg.")
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{video_format}") as tmp_in:
@@ -55,8 +62,22 @@ def extract_audio_from_video(video_file, video_format: str) -> str:
         output_path = tempfile.mktemp(suffix=".wav")
         audio.export(output_path, format="wav")
         os.unlink(input_path)
+        # #region agent log
+        try:
+            _log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+            open(_log_path, "a").write(__import__("json").dumps({"hypothesisId": "H2", "location": "audio_page.py:extract_audio_ok", "message": "extract_audio_from_video success", "data": {"output_path": output_path}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         return output_path
     except Exception as e:
+        # #region agent log
+        try:
+            _log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+            open(_log_path, "a").write(__import__("json").dumps({"hypothesisId": "H2", "location": "audio_page.py:extract_audio_except", "message": "extract_audio_from_video exception", "data": {"type": type(e).__name__, "message": str(e)}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         if os.path.exists(input_path):
             os.unlink(input_path)
         raise e

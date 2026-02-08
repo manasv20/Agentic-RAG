@@ -41,16 +41,38 @@ def _get_clip():
 
 def get_video_duration(video_path: str) -> float:
     """Return video duration in seconds. Raises if video cannot be opened."""
+    # #region agent log
+    try:
+        _lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+        open(_lp, "a").write(__import__("json").dumps({"hypothesisId": "H1", "location": "video_vision.py:get_video_duration_entry", "message": "get_video_duration entry", "data": {"video_path": video_path, "exists": os.path.exists(video_path)}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     cv2 = _get_cv2()
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
+        # #region agent log
+        try:
+            _lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+            open(_lp, "a").write(__import__("json").dumps({"hypothesisId": "H1", "location": "video_vision.py:get_video_duration_not_opened", "message": "VideoCapture not opened", "data": {"video_path": video_path}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         raise RuntimeError(f"Could not open video: {video_path}")
     try:
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         if video_fps <= 0:
             return 0.0
-        return frame_count / video_fps
+        out = frame_count / video_fps
+        # #region agent log
+        try:
+            _lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+            open(_lp, "a").write(__import__("json").dumps({"hypothesisId": "H1", "location": "video_vision.py:get_video_duration_ok", "message": "get_video_duration success", "data": {"duration": out}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        return out
     finally:
         cap.release()
 
@@ -172,24 +194,55 @@ def add_frames_to_existing_collection(
     Collection must already use CLIP (e.g. for unified video = transcript + frames).
     Returns the number of frames added.
     """
-    frames_with_ts = extract_frames(video_path, fps=fps, max_frames=max_frames)
-    if not frames_with_ts:
-        raise RuntimeError("No frames extracted from video")
+    # #region agent log
+    try:
+        _lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+        open(_lp, "a").write(__import__("json").dumps({"hypothesisId": "H3", "location": "video_vision.py:add_frames_entry", "message": "add_frames_to_existing_collection entry", "data": {"video_path": video_path, "fps": fps, "max_frames": max_frames}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+    except Exception:
+        pass
+    # #endregion
+    try:
+        frames_with_ts = extract_frames(video_path, fps=fps, max_frames=max_frames)
+        # #region agent log
+        try:
+            _lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+            open(_lp, "a").write(__import__("json").dumps({"hypothesisId": "H3", "location": "video_vision.py:add_frames_after_extract", "message": "after extract_frames", "data": {"num_frames": len(frames_with_ts)}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        if not frames_with_ts:
+            raise RuntimeError("No frames extracted from video")
 
-    frame_bytes = [b for _, b in frames_with_ts]
-    timestamps = [t for t, _ in frames_with_ts]
-    total = len(frame_bytes)
+        frame_bytes = [b for _, b in frames_with_ts]
+        timestamps = [t for t, _ in frames_with_ts]
+        total = len(frame_bytes)
 
-    if progress_callback:
-        progress_callback(0, total)
-    embeddings = embed_frames(frame_bytes)
-    if progress_callback:
-        progress_callback(total, total)
+        if progress_callback:
+            progress_callback(0, total)
+        embeddings = embed_frames(frame_bytes)
+        if progress_callback:
+            progress_callback(total, total)
 
-    ids = [f"frame_{i}_{hashlib.sha256(frame_bytes[i]).hexdigest()[:12]}" for i in range(total)]
-    metadatas = [{"frame_index": i, "time_sec": round(timestamps[i], 2), "content_type": "video_frame"} for i in range(total)]
-    documents = [f"Frame at {timestamps[i]:.1f}s" for i in range(total)]
+        ids = [f"frame_{i}_{hashlib.sha256(frame_bytes[i]).hexdigest()[:12]}" for i in range(total)]
+        metadatas = [{"frame_index": i, "time_sec": round(timestamps[i], 2), "content_type": "video_frame"} for i in range(total)]
+        documents = [f"Frame at {timestamps[i]:.1f}s" for i in range(total)]
 
-    collection.add(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
-    logger.info(f"Added {total} video frame embeddings to existing collection")
-    return total
+        collection.add(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
+        logger.info(f"Added {total} video frame embeddings to existing collection")
+        # #region agent log
+        try:
+            _lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+            open(_lp, "a").write(__import__("json").dumps({"hypothesisId": "H3", "location": "video_vision.py:add_frames_ok", "message": "add_frames_to_existing_collection success", "data": {"total": total}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        return total
+    except Exception as e:
+        # #region agent log
+        try:
+            _lp = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+            open(_lp, "a").write(__import__("json").dumps({"hypothesisId": "H3", "location": "video_vision.py:add_frames_except", "message": "add_frames_to_existing_collection exception", "data": {"type": type(e).__name__, "message": str(e)}, "timestamp": int(__import__("time").time() * 1000), "runId": "video_workflow"}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        raise

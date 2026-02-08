@@ -24,6 +24,61 @@ Documentation in this repo
 | **AUDIO_FEATURE_SUMMARY.md** | Audio feature overview |
 | **requirements.txt** | Python dependencies |
 
+Workshop setup — libraries and versions
+---------------------------------------
+Use this repo for a workshop by installing the following. Prefer the exact versions below so everyone has the same environment.
+
+**1. Python**
+- **Python 3.10 or 3.11** (3.12 is fine; avoid 3.9 or older).
+
+**2. Pip packages (install from project root)**
+
+```bash
+pip install -r requirements.txt
+```
+
+Key libraries and why we use them:
+
+| Package | Version in requirements | Purpose |
+|---------|--------------------------|---------|
+| **streamlit** | (latest) | Web UI for the workshop app |
+| **PyPDF2** | (latest) | PDF text extraction for Document Processing |
+| **chromadb** | **0.4.24** | Vector store; 0.4.x is pinned for NumPy compatibility |
+| **ollama** | (latest) | Local LLM and embeddings (Ollama server must be running) |
+| **numpy** | >=1.22,<2 | ChromaDB 0.4.x needs NumPy &lt; 2 |
+| **SpeechRecognition** | (latest) | Audio transcription (Google Speech Recognition API) |
+| **pydub** | (latest) | Audio conversion; **requires ffmpeg on your system** |
+| **opencv-python-headless** | >=4.5,<4.10 | Video frame extraction (Video Processing) |
+| **sentence-transformers** | (latest) | CLIP model for video text+frame embeddings |
+| **Pillow** | (latest) | Image handling for CLIP |
+| **python-dotenv** | (latest) | Optional: load `.env` for CHROMA_PATH, LLM_MODEL |
+
+**Minimal install (documents + chat only):**
+```bash
+pip install streamlit PyPDF2 chromadb==0.4.24 ollama numpy "numpy>=1.22,<2" python-dotenv
+```
+
+**Full install (documents + audio + video):**
+```bash
+pip install -r requirements.txt
+```
+Plus install **ffmpeg** and (for video) ensure **opencv-python-headless**, **sentence-transformers**, and **Pillow** are installed.
+
+**3. System dependencies**
+
+| Dependency | Install | Required for |
+|------------|---------|--------------|
+| **ffmpeg** | macOS: `brew install ffmpeg`; Windows: [ffmpeg.org](https://ffmpeg.org/download.html) (add to PATH) | Audio and video (audio extraction) |
+| **Ollama** | [ollama.ai](https://ollama.ai) — install the app, then run `ollama pull phi` and e.g. `ollama pull gemma3:4b` | Embeddings and chat |
+
+**4. Run the app**
+
+```bash
+streamlit run localragdemo.py
+```
+
+If you use a different clone path, replace `Agentic-RAG` with your folder name. The app entry point is **`localragdemo.py`** in the project root (or in `workshop demo/` if you cloned the full RAG Workshop repo).
+
 Requirements
 ------------
 - Python 3.10 or newer
@@ -37,7 +92,7 @@ Quick start (macOS / Linux)
 1. Clone the repo and go into the project directory:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/Agentic-RAG.git
+git clone https://github.com/manasv20/Agentic-RAG.git
 cd Agentic-RAG
 ```
 
@@ -71,7 +126,7 @@ Quick start (Windows PowerShell)
 1. Clone the repo and go into the project directory:
 
 ```powershell
-git clone https://github.com/YOUR_USERNAME/Agentic-RAG.git
+git clone https://github.com/manasv20/Agentic-RAG.git
 cd Agentic-RAG
 ```
 
