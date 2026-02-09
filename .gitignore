@@ -6,3 +6,5 @@ chroma_db/
 logs/
 *.log
 *.mp4
+.DS_Store
+.cursor/

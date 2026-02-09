@@ -1,7 +1,7 @@
 import streamlit as st
 from typing import List, Dict, Any, Tuple, Generator
 import ollama
-from Utilities import CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL, LLM_MODEL
+from Utilities import CHROMA_PATH, COLLECTION_NAME, EMBEDDING_MODEL, LLM_MODEL, RAG_SYSTEM_PROMPT, run_evaluator_grounding_check
 import logging
 import os
 import time
@@ -319,7 +319,11 @@ def chat_page(collection=None):
             return {"context": context, "chunk_count": len(chunks)}
 
         model_name = st.session_state.get("selected_llm_model", LLM_MODEL)
-        messages = [{"role": "user", "content": prompt}]
+        # Context isolation: system prompt (guardrails) separate from user content
+        messages = [
+            {"role": "system", "content": RAG_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
         final_text = ""
         try:
             for _ in range(max_rounds):
@@ -377,13 +381,35 @@ def chat_page(collection=None):
                 # Model doesn't support tool calling: fall back to single-shot RAG (one search + one answer)
                 context, chunks = _run_search(active_collection, prompt, n_results=4)
                 agent_steps.append({"type": "search", "query": prompt, "chunks": chunks})
-                augmented = f"Use the following context from the knowledge base to answer the question. Do not make up information.\n\nContext:\n{context[:6000]}\n\nQuestion: {prompt}\n\nAnswer:"
-                resp = ollama.chat(model=model_name, messages=[{"role": "user", "content": augmented}])
+                # Context isolation: system prompt + user question; context provided as the only augmentation
+                augmented = f"Use ONLY the following context to answer. Do not make up information.\n\nContext:\n{context[:6000]}\n\nQuestion: {prompt}\n\nAnswer:"
+                resp = ollama.chat(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": RAG_SYSTEM_PROMPT},
+                        {"role": "user", "content": augmented},
+                    ],
+                )
                 msg = getattr(resp, "message", resp) if not isinstance(resp, dict) else resp.get("message") or {}
                 final_text = (getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else "") or "").strip()
                 full_response = [final_text] if final_text else []
             else:
                 raise
+
+        # Build full retrieved context for Evaluator (all chunks from all searches)
+        all_chunks = []
+        for step in agent_steps:
+            if step.get("type") == "search":
+                all_chunks.extend(step.get("chunks", []))
+        retrieved_context_for_eval = "\n---\n".join(all_chunks) if all_chunks else ""
+
+        # Evaluator Agent: grounding check before showing answer
+        is_grounded = True
+        grounding_issues = ""
+        if final_text and retrieved_context_for_eval:
+            is_grounded, grounding_issues = run_evaluator_grounding_check(
+                prompt, retrieved_context_for_eval, final_text, model_name
+            )
 
         with st.chat_message("assistant"):
             with st.status("Agentic RAG pipeline", state="running", expanded=True) as status:
@@ -408,6 +434,14 @@ def chat_page(collection=None):
                 answer = "".join(full_response)
                 if answer:
                     st.markdown(answer)
+                time.sleep(0.2)
+                diagram_ph.markdown(advanced_rag_diagram_html("query", 7), unsafe_allow_html=True)
+                st.write("5️⃣ Validation (Evaluator)")
+                if is_grounded:
+                    st.success("✅ Grounded: answer is supported by retrieved context.")
+                else:
+                    st.warning(f"⚠️ Unsupported claims or possible hallucination: {grounding_issues or 'Evaluator flagged ungrounded content.'}")
+                diagram_ph.markdown(advanced_rag_diagram_html("query", 8), unsafe_allow_html=True)
                 status.update(label="Done", state="complete")
 
         if full_response:

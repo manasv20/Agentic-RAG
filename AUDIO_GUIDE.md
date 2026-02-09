@@ -11,32 +11,23 @@ The Audio Processing feature allows you to transcribe audio files and add them t
 
 ## Prerequisites
 
+**First-time setup?** See **[GETTING_STARTED.md](./GETTING_STARTED.md)** for full steps (venv, deps, FFmpeg, Ollama) on Windows and macOS.
+
 ### Required
-1. **SpeechRecognition** - For audio transcription
-   ```bash
-   pip install SpeechRecognition
-   ```
+1. **SpeechRecognition** — audio transcription: `pip install SpeechRecognition` (Windows/macOS, with venv active).
+2. **pydub** — audio format conversion: `pip install pydub`.
 
-2. **pydub** - For audio format conversion
-   ```bash
-   pip install pydub
-   ```
-
-### Optional (Recommended)
-3. **FFmpeg** - Required for non-WAV audio formats (MP3, M4A, OGG, FLAC)
-   - **Windows**: Download from https://ffmpeg.org/download.html or use `choco install ffmpeg`
-   - **macOS**: `brew install ffmpeg`
-   - **Linux**: `sudo apt-get install ffmpeg`
+### Optional (recommended for MP3, M4A, etc.)
+3. **FFmpeg** — for non-WAV formats (MP3, M4A, OGG, FLAC)
+   - **Windows:** `choco install ffmpeg` or download from https://ffmpeg.org/download.html and add `bin` to PATH
+   - **macOS:** `brew install ffmpeg`
+   - **Linux:** `sudo apt-get install ffmpeg`
 
 ## Quick Installation
-Run the automated setup script:
 - **Windows (PowerShell):** `.\install_audio_dependencies.ps1`
 - **macOS / Linux:** `./install_audio_dependencies.sh`
 
-Or verify your setup:
-```bash
-python scripts/test_audio_setup.py
-```
+Verify: **Windows** `python scripts/test_audio_setup.py` | **macOS** `python3 scripts/test_audio_setup.py`
 
 ## Supported Audio Formats
 - **WAV** - Always supported (no FFmpeg needed)

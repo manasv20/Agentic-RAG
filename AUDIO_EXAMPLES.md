@@ -1,5 +1,7 @@
 # Audio Processing Examples
 
+For setup (Windows and macOS), see **[GETTING_STARTED.md](./GETTING_STARTED.md)** and **[AUDIO_GUIDE.md](./AUDIO_GUIDE.md)**.
+
 ## Example 1: Team Meeting Recording
 
 **Scenario**: Weekly team standup meeting  

@@ -1,4 +1,21 @@
-# Audio Processing - Quick Command Reference
+# Quick Command Reference — Windows & macOS
+
+Use this page for copy-paste commands. For a full step-by-step guide, see **[GETTING_STARTED.md](./GETTING_STARTED.md)**.
+
+---
+
+## What you need to do (summary)
+
+| Step | Windows (PowerShell) | macOS (Terminal) |
+|------|------------------------|------------------|
+| 1. Clone | `git clone https://github.com/manasv20/Agentic-RAG.git` then `cd Agentic-RAG` | Same |
+| 2. Venv | `python -m venv .venv` then `.\.venv\Scripts\Activate.ps1` | `python3 -m venv .venv` then `source .venv/bin/activate` |
+| 3. Deps | `pip install -r requirements.txt` | Same |
+| 4. FFmpeg | `choco install ffmpeg` or download and add to PATH | `brew install ffmpeg` |
+| 5. Ollama | Install from ollama.ai, then `ollama pull phi` and `ollama pull gemma3:4b` | Same |
+| 6. Run | `streamlit run localragdemo.py` | Same |
+
+---
 
 ## Installation Commands
 

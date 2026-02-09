@@ -74,7 +74,7 @@ def advanced_rag_diagram_html(phase: str = "both", active_index: int = -1) -> st
     else:
         idx_active = -1
     if phase == "query" and active_index >= 0:
-        q_active = min(active_index + 1, 7)  # 0->1 Query, 1->2 Embed, ..., 6->7 Response
+        q_active = min(active_index + 1, 8)  # 0->1 Query, ..., 6->7 Response, 7->8 Evaluator
     else:
         q_active = -1
     if phase == "both":
@@ -98,7 +98,7 @@ def advanced_rag_diagram_html(phase: str = "both", active_index: int = -1) -> st
         + _lh_arrow("Indexing")
         + index_node(4, "Vector Store")
     )
-    # Query row: User → Query → Embedding Model → Vectorize → Search → Vector Store → Retrieve → Relevant Contexts → Augment → Prompt → LLM → Generate → Response
+    # Query row: ... → LLM → Generate → Response → Validate → Evaluator
     query_row = (
         query_node(0, "User")
         + _lh_arrow("Query")
@@ -116,6 +116,8 @@ def advanced_rag_diagram_html(phase: str = "both", active_index: int = -1) -> st
         + query_node(6, "LLM")
         + _lh_arrow("Generate")
         + query_node(7, "Response")
+        + _lh_arrow("Validate")
+        + query_node(8, "Evaluator")
     )
 
     return (

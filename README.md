@@ -1,25 +1,43 @@
 # Agentic RAG Workshop
 
-A lightweight Retrieval-Augmented Generation (RAG) demo for local document and audio Q&A:
+A lightweight Retrieval-Augmented Generation (RAG) demo for local document, audio, and video Q&A.
 
-- **Fast Setup**: Uses Streamlit for the UI and runs completely locally
-- **Flexible Storage**: Uses ChromaDB for vector storage (with in-memory fallback)
-- **LLM**: Ollama only for local chat and embeddings
-- **Agentic RAG**: Chat agent can search your docs multiple times before answering (when the model supports tools; otherwise single-shot RAG)
-- **Smart Chunking**: The agent has full autonomy over sampling: for documents it decides how many pages to sample; for audio/video transcripts it decides how many characters to sample. Then the LLM picks chunk size, separators, and style from that sample. Fixed/recursive and table-aware strategies supported.
-- **Audio Transcription**: Process audio/video (meetings, podcasts) and add transcriptions to your knowledge base
+---
 
-Process your PDF documents and audio files, manage multiple collections, and chat with your content using retrieval-augmented generation — all running locally on your machine.
+## What you need to do (quick)
 
-This README provides step-by-step setup for **Windows (PowerShell)** and **macOS (Terminal)** with troubleshooting tips.
+**First time?** Follow **[GETTING_STARTED.md](./GETTING_STARTED.md)** step-by-step for **Windows** or **macOS**. It covers: clone → venv → install dependencies → FFmpeg → Ollama → run the app.
+
+**Already set up?** Activate your venv, then run:
+
+- **Windows (PowerShell):** `streamlit run localragdemo.py`
+- **macOS (Terminal):** `streamlit run localragdemo.py`
+
+---
+
+## Features
+
+- **Fast setup**: Streamlit UI; runs fully locally.
+- **ChromaDB**: Vector storage (persistent or in-memory fallback).
+- **Ollama**: Local LLM and embeddings only.
+- **Agentic RAG**: Chat agent can call `search_documents` multiple times before answering (when the model supports tools); otherwise single-shot RAG.
+- **Evaluator agent**: Grounding check on the final answer (goal: zero hallucination).
+- **Agentic chunking**: For documents the agent samples pages and picks chunk size/separators/style; for audio/video it samples transcript and picks chunk params. Recursive, table-aware, and section chunking supported.
+- **Audio**: Transcribe audio/video (meetings, podcasts) and add to your knowledge base.
+- **Video**: Frame extraction (OpenCV), CLIP embeddings; agent picks frame rate.
+
+Process PDFs, audio, and video; manage collections; chat with your content — all on your machine.
+
+This README gives full reference. For a clear **Windows + macOS** setup checklist, use **GETTING_STARTED.md**.
 
 Documentation in this repo
 --------------------------
 | File | Description |
 |------|-------------|
+| **GETTING_STARTED.md** | Step-by-step setup for Windows and macOS — start here |
 | **README.md** (this file) | Full setup, usage, and reference |
-| **COMMANDS.md** | Quick command reference (install, run, audio) |
-| **AUDIO_GUIDE.md** | Audio processing guide |
+| **COMMANDS.md** | Quick command reference (install, run, audio) for both platforms |
+| **AUDIO_GUIDE.md** | Audio processing guide (Windows + macOS) |
 | **AUDIO_EXAMPLES.md** | Audio usage examples |
 | **AUDIO_FEATURE_SUMMARY.md** | Audio feature overview |
 | **requirements.txt** | Python dependencies |
@@ -89,6 +107,8 @@ Requirements
 
 Quick start (macOS / Linux)
 ---------------------------
+**For a full step-by-step list, see [GETTING_STARTED.md](./GETTING_STARTED.md).**
+
 1. Clone the repo and go into the project directory:
 
 ```bash
@@ -109,13 +129,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. (Optional) Install ffmpeg for full audio support (MP3, M4A, etc.):
+4. Install ffmpeg for full audio/video support (MP3, M4A, etc.):
 
 ```bash
 brew install ffmpeg
 ```
 
-5. ChromaDB and Ollama: ChromaDB is in requirements. For Ollama, install from https://ollama.ai and pull a model (e.g. `ollama pull phi`). Then run the app:
+5. Install Ollama from https://ollama.ai, then pull a model (e.g. `ollama pull phi`, `ollama pull gemma3:4b`). Run the app:
 
 ```bash
 streamlit run localragdemo.py
@@ -123,6 +143,8 @@ streamlit run localragdemo.py
 
 Quick start (Windows PowerShell)
 --------------------------------
+**For a full step-by-step list, see [GETTING_STARTED.md](./GETTING_STARTED.md).**
+
 1. Clone the repo and go into the project directory:
 
 ```powershell
@@ -136,15 +158,15 @@ cd Agentic-RAG
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
+*If you get an execution policy error: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`*
 
 3. Install Python dependencies:
 
 ```powershell
 pip install -r requirements.txt
-# (If you didn't include streamlit in requirements) pip install streamlit
 ```
 
-4. Install and configure ChromaDB for persistent collections:
+4. Install FFmpeg (Chocolatey: `choco install ffmpeg`; or download from https://ffmpeg.org/download.html and add `bin` to PATH). Install Ollama from https://ollama.ai and pull a model. For ChromaDB (persistent collections):
 
 - If you want to persist collections to disk instead of the in-memory fallback, install `chromadb` in your environment. See https://www.trychroma.com/docs for installation steps. The app uses the `CHROMA_PATH` environment variable to determine where to store the DB.
 

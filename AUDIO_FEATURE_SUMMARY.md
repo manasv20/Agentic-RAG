@@ -1,5 +1,7 @@
 # Audio Processing Feature - Implementation Summary
 
+For setup on **Windows** or **macOS**, see **[GETTING_STARTED.md](./GETTING_STARTED.md)**.
+
 ## Overview
 Added a complete audio processing pipeline to the local-RAG-LLM application, enabling users to transcribe audio files and store them in ChromaDB collections alongside document content.
 
